@@ -144,7 +144,7 @@ def _sync_fetch_and_plot_data(width=6.4, height=4.8) -> Optional[Tuple[io.BytesI
         # VIX annotations
         ax2.text(new_text_x_pos, 15.5, "VIX 15 (Greed/Sell)", color='yellow', fontsize=new_fontsize, verticalalignment='bottom', horizontalalignment='right', fontweight='bold')
         ax2.text(new_text_x_pos, 30.5, "VIX 30 (Warning)", color='peru', fontsize=new_fontsize, verticalalignment='bottom', horizontalalignment='right', fontweight='bold')
-        ax2.text(new_text_x_pos, 40.5, "VIX 40 (Fear/Buy)", color='lightGreen', fontsize=new_fontsize, verticalalignment='bottom', horizontalalignment='right', fontweight='bold')
+        ax2.text(new_text_x_pos, 40.5, "VIX 40 (Fear/Buy)", color='yellow', fontsize=new_fontsize, verticalalignment='bottom', horizontalalignment='right', fontweight='bold')
         
         # VIX horizontal lines
         ax2.axhline(y=15, color='yellow', linestyle='--', linewidth=1.2, alpha=0.8)
