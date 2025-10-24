@@ -70,7 +70,7 @@ def _sync_fetch_and_plot_data(width=6.4, height=4.8) -> Optional[Tuple[io.BytesI
     vix, qqq = None, None
     
     # Using a fixed start date for consistent comparison
-    start_date = "2025-04-01" 
+    start_date = "2025-03-01" 
     
     logger.info("Executing synchronous data download and chart generation...")
             
@@ -124,9 +124,9 @@ def _sync_fetch_and_plot_data(width=6.4, height=4.8) -> Optional[Tuple[io.BytesI
         ax1.plot(common_dates, qqq.values, color=qqq_color, linewidth=1.5)
         
         # X-axis date format and interval setting
-        formatter = mdates.DateFormatter('%Y-%m-%d') 
+        formatter = mdates.DateFormatter('%y-%m-%d') 
         ax1.xaxis.set_major_formatter(formatter)
-        ax1.xaxis.set_major_locator(mdates.MonthLocator(interval=4)) 
+        ax1.xaxis.set_major_locator(mdates.MonthLocator(interval=3)) 
         fig.autofmt_xdate(rotation=45)
 
         # Y-axis label setting
@@ -287,7 +287,7 @@ async def run_and_send_plot() -> bool:
         f"\n🗓️ {latest_date_utc} (US Market Close)\n"
         f"📉 VIX (Volatility): **{latest_vix:.2f}**\n"
         f"📈 S&P 500 (Index): **{latest_gspc:.0f}**\n\n"
-        f"VIX and the S&P 500 typically move in opposite directions.\n"
+        f"VIX and S&P 500 Index typically move in opposite directions.\n"
     )
 
     success = await send_photo_via_http(TELEGRAM_TARGET_CHAT_ID, plot_buffer, caption)
