@@ -7,21 +7,28 @@ import logging
 from datetime import datetime, timedelta
 from typing import Optional, Tuple
 
-# FastAPI 및 uvicorn import (웹 서비스 구동을 위해 필요)
-from fastapi import FastAPI
-import uvicorn
+# =========================================================
+# 💡 [2] 그래프/데이터 관련 외부 라이브러리 (글로벌 임포트로 이동)
+# 사용자님의 지적대로, 반복 임포트 비효율성 및 클린 코드 준수를 위해 상단으로 이동
+import yfinance as yf
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+import matplotlib
+# zoneinfo는 Python 3.9 이상에서 표준 라이브러리입니다.
+from zoneinfo import ZoneInfo 
+# =========================================================
+
+# 로깅 설정 (INFO 레벨로 주요 동작만 기록)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # =========================================================
 # --- [1] 설정 및 환경 변수 로드 ---
 # =========================================================
-# 로깅 설정 (INFO 레벨로 주요 동작만 기록)
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
 # 한국 시간 (KST)은 UTC+9입니다.
 KST_OFFSET_HOURS = 9
 # ⏰ 사용자가 원하는 발송 시간 설정 (시, 분)
 TARGET_HOUR_KST = 10    # 한국 시간 '시'
-TARGET_MINUTE_KST = 40 # ✅ 새로 추가: 한국 시간 '분' (예: 8시 30분)
+TARGET_MINUTE_KST = 45 # 한국 시간 '분' (예: 8시 30분)
 MONITOR_INTERVAL_SECONDS = 60 # 1분마다 시간 체크 (중복 발송 방지를 위해 유지)
 
 # ⚠️ 환경 변수에서 로드 (Render 환경에 필수)
@@ -37,24 +44,19 @@ if 'YOUR_BOT_TOKEN_HERE' in TELEGRAM_BOT_TOKEN or TELEGRAM_TARGET_CHAT_ID == '-1
 
 # =========================================================
 # --- [2] VIX Plotter 함수 (그래프 생성 로직) ---
+# *주의: 이제 내부에서 임포트 하지 않습니다!*
 # =========================================================
-# 이 함수는 이전 파일에서 그대로 가져온 그래프 생성 로직입니다.
 def plot_vix_sp500(width=6.4, height=4.8):
     """
     VIX/S&P 500 데이터를 다운로드하고 그래프를 생성하여 BytesIO로 반환합니다.
     """
-    import yfinance as yf
-    import matplotlib.pyplot as plt
-    import matplotlib.dates as mdates
-    import matplotlib
-    from zoneinfo import ZoneInfo
     
     # vix_plotter.py의 설정 반영
     matplotlib.use('Agg')
     plt.style.use('dark_background')
     # 한글 폰트 설정 (서버 환경에 맞춰 Noto Sans CJK JP 사용 권장)
     try:
-        # Render 환경에서는 'Malgun Gothic' 대신 'Noto Sans CJK JP' 등을 사용해야 합니다.
+        # 'Malgun Gothic' 대신 서버 환경에 맞는 폰트 사용
         matplotlib.rcParams['font.family'] = 'Noto Sans CJK JP' 
     except Exception:
         logging.warning("Noto Sans CJK JP 폰트 로드 실패. 기본 폰트 사용.")
@@ -63,6 +65,7 @@ def plot_vix_sp500(width=6.4, height=4.8):
 
     try:
         logging.info("그래프 데이터 생성 중... (yfinance 다운로드)")
+        # ⚠️ yfinance는 이제 전역(Global)에서 임포트되었습니다.
         vix_df = yf.download("^VIX", start=start_date, end=None, progress=False)
         qqq_df = yf.download("^GSPC", start=start_date, end=None, progress=False)
         
@@ -75,7 +78,7 @@ def plot_vix_sp500(width=6.4, height=4.8):
             logging.error("yfinance에서 데이터를 가져오지 못했습니다.")
             return None
 
-        # 플로팅 로직
+        # 플로팅 로직 (이하 동일)
         fig, ax1 = plt.subplots(figsize=(width, height)) 
         ax2 = ax1.twinx()
         fig.patch.set_facecolor('#222222')
@@ -250,8 +253,6 @@ async def main_monitor_loop():
                 # 목표 시간이 아닌 경우, INFO 대신 DEBUG 레벨로 출력하여 로그 폭주 방지
                 logging.debug(f"[WAIT] KST:{current_time_str} | 다음 목표 시간({target_time_str}) 대기 중")
             
-            # 🚨 이전 코드의 기타 불필요한 else/log 구문을 제거하고 루프를 단순화했습니다.
-
         except Exception as e:
             logging.error(f"[ERROR] 스케줄링 루프 중 치명적인 오류 발생: {e}. 60초 후 재시도.")
             
@@ -261,6 +262,7 @@ async def main_monitor_loop():
 # =========================================================
 # --- [5] FastAPI 웹 서비스 및 핑 체크 설정 ---
 # =========================================================
+# FastAPI 및 uvicorn import는 파일 상단에 이미 있습니다.
 app = FastAPI(
     title="VIX Plot Telegram Scheduler",
     description="VIX/S&P 500 Chart Sender running on Render Free Tier.",
@@ -282,7 +284,7 @@ async def health_check():
         "message": f"VIX scheduler is active in the background (checking every {MONITOR_INTERVAL_SECONDS} seconds).",
         "last_plot_sent_date_kst": status.get('last_sent_date_kst'),
         "last_check_time_kst": status.get('last_check_time_kst'),
-        "target_time_kst": f"{TARGET_HOUR_KST:02d}:{TARGET_MINUTE_KST:02d}" # ✅ 분까지 표시
+        "target_time_kst": f"{TARGET_HOUR_KST:02d}:{TARGET_MINUTE_KST:02d}" 
     }
 
 # =========================================================
@@ -291,4 +293,5 @@ async def health_check():
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 8000))
     logging.info(f"Starting uvicorn server on port {port}...")
+    # uvicorn import는 파일 상단에 이미 있습니다.
     uvicorn.run(app, host="0.0.0.0", port=port)
