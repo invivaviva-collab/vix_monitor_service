@@ -33,7 +33,7 @@ MONITOR_INTERVAL_SECONDS = 60 # 1분마다 시간 체크
 
 # ⏰ 전역 상태: 사용자가 설정할 수 있는 발송 시간 (KST)
 TARGET_HOUR_KST = int(os.environ.get('TARGET_HOUR_KST', 12))
-TARGET_MINUTE_KST = int(os.environ.get('TARGET_MINUTE_KST', 30))
+TARGET_MINUTE_KST = int(os.environ.get('TARGET_MINUTE_KST', 50))
 
 # ⚠️ 환경 변수에서 로드 (Render 환경에 필수) - 사용자가 지정한 하드코딩 값 유지
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', 'YOUR_BOT_TOKEN_HERE')
@@ -146,8 +146,8 @@ def plot_vix_sp500(width=6.4, height=4.8) -> Optional[io.BytesIO]:
         fig.autofmt_xdate(rotation=45)
 
         # Y축 레이블 설정 (한글 -> 영어 변경)
-        ax1.set_ylabel('S&P 500 Index', color=qqq_color, fontsize=12, fontweight='bold', labelpad=15)
-        ax2.set_ylabel('VIX', color=vix_color, fontsize=12, fontweight='bold', labelpad=15)
+        ax1.set_ylabel('S&P 500 Index', color=qqq_color, fontsize=12, fontweight='bold', labelpad=5)
+        ax2.set_ylabel('VIX', color=vix_color, fontsize=12, fontweight='bold', labelpad=5)
         
         # VIX 레벨 주석 및 수평선 추가
         try:
@@ -169,7 +169,8 @@ def plot_vix_sp500(width=6.4, height=4.8) -> Optional[io.BytesIO]:
         
         # 제목 및 여백 최소화
         fig.suptitle(title_text, color='white', fontsize=12, fontweight='bold', y=0.98) 
-        fig.tight_layout(rect=[0.025, 0.05, 0.975, 1.0]) 
+        # fig.tight_layout(rect=[0.025, 0.05, 0.975, 1.0]) 
+        fig.tight_layout(rect=[0.025, 0.025, 1, 1]) 
         
         # ⭐️ 메모리 버퍼에 PNG 이미지로 저장 (디스크 미사용 핵심) ⭐️
         plot_data = io.BytesIO()
