@@ -33,7 +33,7 @@ MONITOR_INTERVAL_SECONDS = 60 # 1분마다 시간 체크
 
 # ⏰ 전역 상태: 사용자가 설정할 수 있는 발송 시간 (KST)
 TARGET_HOUR_KST = int(os.environ.get('TARGET_HOUR_KST', 12))
-TARGET_MINUTE_KST = int(os.environ.get('TARGET_MINUTE_KST', 10))
+TARGET_MINUTE_KST = int(os.environ.get('TARGET_MINUTE_KST', 30))
 
 # ⚠️ 환경 변수에서 로드 (Render 환경에 필수) - 사용자가 지정한 하드코딩 값 유지
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', 'YOUR_BOT_TOKEN_HERE')
@@ -46,7 +46,7 @@ logger = logging.getLogger(__name__)
 
 # 특수 문자 오류 제거
 if 'YOUR_BOT_TOKEN_HERE' in TELEGRAM_BOT_TOKEN or TELEGRAM_TARGET_CHAT_ID == '-1000000000':
-    logger.warning("⚠️ 경고: TELEGRAM_BOT_TOKEN 또는 CHAT_ID가 기본값입니다. 환경 변수를 설정해주세요.")
+    logger.warning("⚠️ Warning: TELEGRAM_BOT_TOKEN or CHAT_ID is set to default. Please configure environment variables.")
 
 # 💾 서버 RAM에서 상태 유지 (Render 재시작 시 초기화될 수 있음 - 디스크 미사용)
 status = {
@@ -64,7 +64,10 @@ def plot_vix_sp500(width=6.4, height=4.8) -> Optional[io.BytesIO]:
     VIX와 S&P 500의 종가 추이를 비교하는 차트를 생성합니다.
     Rate Limit 회피를 위한 지수적 백오프 재시도 로직이 적용되어 있습니다.
     """
-    logger.info("📈 데이터 다운로드 및 차트 생성 시작...")
+    # ------------------------------------------------------------------
+    # 🚫 주의: 이 함수 내부의 모든 한글 텍스트는 요청에 따라 영어로 변경되었습니다.
+    # ------------------------------------------------------------------
+    logger.info("📈 Starting data download and chart generation...")
 
     # Rate Limit 회피를 위한 지수적 백오프 재시도 로직
     max_retry = 4 # 최대 4번 시도 (1차 + 3번 재시도)
@@ -110,7 +113,7 @@ def plot_vix_sp500(width=6.4, height=4.8) -> Optional[io.BytesIO]:
     if vix is None or qqq is None:
         return None
 
-    # 최종 확정된 차트 디자인 로직 적용 (그래프 로직은 변경 없음)
+    # 최종 확정된 차트 디자인 로직 적용
     try:
         # 폰트 설정 제거 (서버 환경 안정화를 위해)
         plt.style.use('dark_background')
@@ -142,8 +145,8 @@ def plot_vix_sp500(width=6.4, height=4.8) -> Optional[io.BytesIO]:
         ax1.xaxis.set_major_locator(mdates.MonthLocator(interval=4)) # 4개월 간격 유지
         fig.autofmt_xdate(rotation=45)
 
-        # Y축 레이블 설정
-        ax1.set_ylabel('S&P 500', color=qqq_color, fontsize=12, fontweight='bold', labelpad=15)
+        # Y축 레이블 설정 (한글 -> 영어 변경)
+        ax1.set_ylabel('S&P 500 Index', color=qqq_color, fontsize=12, fontweight='bold', labelpad=15)
         ax2.set_ylabel('VIX', color=vix_color, fontsize=12, fontweight='bold', labelpad=15)
         
         # VIX 레벨 주석 및 수평선 추가
@@ -154,10 +157,10 @@ def plot_vix_sp500(width=6.4, height=4.8) -> Optional[io.BytesIO]:
              # 데이터가 너무 적을 경우의 안전 장치
              new_text_x_pos = common_dates[-1] + timedelta(days=1)
         
-        # VIX 주석 (오른쪽 정렬)
-        ax2.text(new_text_x_pos, 15.5, "VIX 15 (탐욕/매도)", color='yellow', fontsize=new_fontsize, verticalalignment='bottom', horizontalalignment='right', fontweight='bold')
-        ax2.text(new_text_x_pos, 30.5, "VIX 30 (경고)", color='peru', fontsize=new_fontsize, verticalalignment='bottom', horizontalalignment='right', fontweight='bold')
-        ax2.text(new_text_x_pos, 40.5, "VIX 40 (공포/매수)", color='lightGreen', fontsize=new_fontsize, verticalalignment='bottom', horizontalalignment='right', fontweight='bold')
+        # VIX 주석 (한글 -> 영어 변경)
+        ax2.text(new_text_x_pos, 15.5, "VIX 15 (Greed/Sell)", color='yellow', fontsize=new_fontsize, verticalalignment='bottom', horizontalalignment='right', fontweight='bold')
+        ax2.text(new_text_x_pos, 30.5, "VIX 30 (Warning)", color='peru', fontsize=new_fontsize, verticalalignment='bottom', horizontalalignment='right', fontweight='bold')
+        ax2.text(new_text_x_pos, 40.5, "VIX 40 (Fear/Buy)", color='lightGreen', fontsize=new_fontsize, verticalalignment='bottom', horizontalalignment='right', fontweight='bold')
         
         # VIX 수평선
         ax2.axhline(y=15, color='yellow', linestyle='--', linewidth=1.2, alpha=0.8)
@@ -174,11 +177,11 @@ def plot_vix_sp500(width=6.4, height=4.8) -> Optional[io.BytesIO]:
         plot_data.seek(0)
         
         plt.close(fig) # **매우 중요: 메모리 누수 방지**
-        logger.info("✅ 차트 생성 완료 (메모리 저장).")
+        logger.info("✅ Chart generation complete (saved to memory).")
         return plot_data
 
     except Exception as e:
-        logger.error(f"❌ 차트 생성 중 예외 발생: {e}", exc_info=True)
+        logger.error(f"❌ Exception during chart generation: {e}", exc_info=True)
         return None
 
 # =========================================================
@@ -194,31 +197,31 @@ async def send_photo_via_http(chat_id: str, photo_bytes: io.BytesIO, caption: st
     data.add_field('parse_mode', 'Markdown')
     # ⭐️ io.BytesIO 객체를 직접 photo 필드에 전달 ⭐️
     data.add_field('photo', 
-                   photo_bytes, 
-                   filename='vix_gspc_chart.png', 
-                   content_type='image/png')
+                    photo_bytes, 
+                    filename='vix_gspc_chart.png', 
+                    content_type='image/png')
 
     # 재시도 로직 추가 (네트워크 문제 대비)
     for attempt in range(3):
         try:
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) as session:
-                logger.info(f"텔레그램 발송 요청 시작 (시도 {attempt + 1}/3, Chat ID: {chat_id})...")
+                logger.info(f"Telegram send request initiated (Attempt {attempt + 1}/3, Chat ID: {chat_id})...")
                 async with session.post(url, data=data) as response:
                     response.raise_for_status() # HTTP 오류 발생 시 예외 발생
                     response_json = await response.json()
                     if response_json.get('ok'):
-                        logger.info("✅ 텔레그램 발송 성공!")
+                        logger.info("✅ Telegram send successful!")
                         return True
                     else:
                         error_desc = response_json.get('description', 'Unknown Error')
                         raise Exception(f"Telegram API Error: {error_desc}")
                         
         except Exception as e:
-            logger.warning(f"❌ 텔레그램 전송 중 오류 발생 (시도 {attempt + 1}/3): {e}. 잠시 후 재시도.")
+            logger.warning(f"❌ Telegram send error (Attempt {attempt + 1}/3): {e}. Retrying shortly.")
             if attempt < 2:
                 await asyncio.sleep(2 ** attempt) # Exponential Backoff: 1s, 2s 대기
             
-    logger.error("텔레그램 발송 최종 실패.")
+    logger.error("Telegram send final failure.")
     return False
 
 async def run_and_send_plot() -> bool:
@@ -226,16 +229,16 @@ async def run_and_send_plot() -> bool:
     global status
     
     if 'YOUR_BOT_TOKEN_HERE' in TELEGRAM_BOT_TOKEN or TELEGRAM_TARGET_CHAT_ID == '-1000000000':
-        logger.error("텔레그램 토큰 또는 Chat ID가 기본값입니다. 발송을 건너뜁니다.")
+        logger.error("Telegram token or Chat ID is set to default. Skipping send.")
         return False
         
     plot_buffer = plot_vix_sp500()
     if not plot_buffer:
-        logger.error("차트 생성 실패로 인해 전송을 건너뛰고 다음 목표 시간을 다시 계산합니다.")
+        logger.error("Chart generation failed. Skipping send and recalculating next target time.")
         return False
     
     # 캡션을 위해 최신 데이터 가져오기 (차트 생성 실패를 대비해 별도 로직 유지)
-    latest_vix, latest_gspc, latest_date_utc = "N/A", "N/A", "최신 데이터 확보 실패"
+    latest_vix, latest_gspc, latest_date_utc = "N/A", "N/A", "Latest Data Acquisition Failed"
     try:
         # 짧은 기간으로 데이터를 가져와서 캡션에 사용 (메모리 사용)
         data = yf.download(["^VIX", "^GSPC"], period="5d", progress=False, timeout=10)
@@ -248,13 +251,14 @@ async def run_and_send_plot() -> bool:
             # VIX와 GSPC의 마지막 인덱스 중 더 최근 날짜를 사용 (일반적으로 같음)
             latest_date_utc = max(vix_data.index[-1], gspc_data.index[-1]).strftime('%Y-%m-%d')
     except Exception:
-        logger.warning("캡션에 사용할 최신 VIX/S&P 500 데이터 확보 실패. 'N/A' 사용.")
+        logger.warning("Failed to acquire latest VIX/S&P 500 data for caption. Using 'N/A'.")
 
 
     caption = (
-        f"\n🗓️ {latest_date_utc} (미국 시장 마감 기준)\n"
-        f"📉 VIX (변동성): **{latest_vix:.2f}**\n"
-        f"📈 S&P 500 (지수): **{latest_gspc:.0f}**\n\n"
+        # 한글 -> 영어 변경
+        f"\n🗓️ {latest_date_utc} (US Market Close)\n"
+        f"📉 VIX (Volatility): **{latest_vix:.2f}**\n"
+        f"📈 S&P 500 (Index): **{latest_gspc:.0f}**\n\n"
         f"VIX and the S&P 500 typically move in opposite directions.\n"
     )
 
@@ -264,7 +268,7 @@ async def run_and_send_plot() -> bool:
     if success:
         current_kst = datetime.now(KST_TZ)
         status['last_sent_date_kst'] = current_kst.strftime("%Y-%m-%d")
-        logger.info(f"성공적으로 발송 완료. 마지막 발송 날짜 업데이트: {status['last_sent_date_kst']}")
+        logger.info(f"Successfully sent. Last sent date updated: {status['last_sent_date_kst']}")
     
     return success
 
@@ -300,13 +304,16 @@ async def main_monitor_loop():
     next_target_time_kst = calculate_next_target_time(now_kst)
     status['next_scheduled_time_kst'] = next_target_time_kst.strftime("%Y-%m-%d %H:%M:%S KST")
     
-    logger.info(f"🔍 모니터링 시작. 다음 발송 예정 시간 (KST): {status['next_scheduled_time_kst']}")
+    logger.info(f"🔍 Monitoring started. Next scheduled time (KST): {status['next_scheduled_time_kst']}")
     
     while True:
         await asyncio.sleep(MONITOR_INTERVAL_SECONDS)
         
         current_kst = datetime.now(KST_TZ)
         status['last_check_time_kst'] = current_kst.strftime("%Y-%m-%d %H:%M:%S KST")
+        
+        # 🔔 요청에 따라 1분마다 스케줄 확인 로그를 WARNING 레벨로 출력합니다.
+        logger.warning(f"Monitor: Checking schedule (KST: {current_kst.strftime('%H:%M:%S')}).")
         
         # 발송 조건 확인 (하루에 한 번, 지정된 시간에 발송)
         target_date_kst = next_target_time_kst.strftime("%Y-%m-%d")
@@ -315,7 +322,8 @@ async def main_monitor_loop():
            current_kst < next_target_time_kst + timedelta(minutes=1) and \
            target_date_kst != status['last_sent_date_kst']:
 
-            logger.info(f"⏰ 발송 시간 도달 (KST: {current_kst.strftime('%H:%M:%S')}). 작업 실행.")
+            # 한글 -> 영어 변경
+            logger.info(f"⏰ Send time reached (KST: {current_kst.strftime('%H:%M:%S')}). Executing job.")
             
             # 발송 로직 실행
             await run_and_send_plot()
@@ -323,7 +331,8 @@ async def main_monitor_loop():
             # 다음 목표 시간 업데이트
             next_target_time_kst = calculate_next_target_time(current_kst)
             status['next_scheduled_time_kst'] = next_target_time_kst.strftime("%Y-%m-%d %H:%M:%S KST")
-            logger.info(f"➡️ 다음 발송 예정 시간 (KST): {status['next_scheduled_time_kst']}")
+            # 한글 -> 영어 변경
+            logger.info(f"➡️ Next scheduled time (KST): {status['next_scheduled_time_kst']}")
             
         elif current_kst.day != next_target_time_kst.day and \
              current_kst.hour > TARGET_HOUR_KST + 1:
@@ -338,7 +347,7 @@ async def self_ping_loop():
     global status
     # Render 내부에서 자신의 IP/포트로 요청
     ping_url = f"http://127.0.0.1:{SERVER_PORT}/" 
-    logger.info(f"🛡️ 내부 셀프 핑 루프 시작. 5분마다 {ping_url}로 요청을 보냅니다.")
+    logger.info(f"🛡️ Starting internal self-ping loop. Requesting {ping_url} every 5 minutes.")
     
     async with aiohttp.ClientSession() as session:
         while True:
@@ -349,12 +358,12 @@ async def self_ping_loop():
                 async with session.head(ping_url, timeout=10) as response:
                     if response.status == 200:
                         status['last_self_ping_kst'] = datetime.now(KST_TZ).strftime("%Y-%m-%d %H:%M:%S KST")
-                        logger.debug(f"✅ 셀프 핑 성공: {status['last_self_ping_kst']}")
+                        logger.debug(f"✅ Self-ping successful: {status['last_self_ping_kst']}")
                     else:
-                        logger.warning(f"❌ 셀프 핑 실패 (Status: {response.status})")
+                        logger.warning(f"❌ Self-ping failed (Status: {response.status})")
                         
             except Exception as e:
-                logger.error(f"❌ 셀프 핑 중 예외 발생: {e}")
+                logger.error(f"❌ Exception during self-ping: {e}")
 
 
 # =========================================================
@@ -375,7 +384,7 @@ async def startup_event():
     asyncio.create_task(main_monitor_loop()) 
     # 슬립 방지 보조용 셀프 핑 루프
     asyncio.create_task(self_ping_loop())    
-    logger.info("🚀 백그라운드 스케줄링 및 셀프 핑 루프가 시작되었습니다.")
+    logger.info("🚀 Background scheduling and self-ping loops have started.") # 한글 -> 영어 변경
 
 # ---------------------------------------------------------
 # 새로운 엔드포인트: 스케줄링 시간 설정
@@ -393,11 +402,11 @@ async def set_schedule_time(
         hour_int = int(hour)
         minute_int = int(minute)
     except ValueError:
-        raise HTTPException(status_code=400, detail="시간과 분은 정수여야 합니다.")
+        raise HTTPException(status_code=400, detail="Hour and minute must be integers.") # 한글 -> 영어 변경
         
     # 유효성 검사
     if not (0 <= hour_int <= 23 and 0 <= minute_int <= 59):
-        raise HTTPException(status_code=400, detail="유효하지 않은 시간(0-23) 또는 분(0-59)입니다.")
+        raise HTTPException(status_code=400, detail="Invalid hour (0-23) or minute (0-59).") # 한글 -> 영어 변경
         
     # 전역 변수 업데이트
     TARGET_HOUR_KST = hour_int
@@ -408,7 +417,8 @@ async def set_schedule_time(
     next_target_time_kst = calculate_next_target_time(now_kst)
     status['next_scheduled_time_kst'] = next_target_time_kst.strftime("%Y-%m-%d %H:%M:%S KST")
 
-    logger.info(f"⏰ 스케줄링 시간 변경됨: {TARGET_HOUR_KST:02d}:{TARGET_MINUTE_KST:02d} KST. 다음 발송 시간 업데이트됨: {status['next_scheduled_time_kst']}")
+    # 한글 -> 영어 변경
+    logger.info(f"⏰ Schedule time changed to: {TARGET_HOUR_KST:02d}:{TARGET_MINUTE_KST:02d} KST. Next send time updated: {status['next_scheduled_time_kst']}") 
     
     # 상태 페이지로 리다이렉트 (303 See Other)
     return RedirectResponse(url="/", status_code=303)
@@ -450,32 +460,32 @@ async def health_check(request: Request): # 👈 Request 객체를 인수로 받
         </head>
         <body>
             <div class="container">
-                <h1>✅ VIX 스케줄러 상태 (KST)</h1>
+                <h1>✅ VIX Scheduler Status (KST)</h1>
 
-                <h2>현재 스케줄 상태</h2>
-                <p>현재 KST 시간: <span class="highlight">{current_kst.strftime('%Y-%m-%d %H:%M:%S KST')}</span></p>
-                <p>현재 설정 발송 시간: <span class="highlight">{TARGET_HOUR_KST:02d}:{TARGET_MINUTE_KST:02d} KST</span></p>
-                <p>다음 발송 예정 시간: <span class="highlight">{status.get('next_scheduled_time_kst')}</span></p>
-                <p>마지막 성공 발송 날짜: <span class="highlight">{status.get('last_sent_date_kst')}</span></p>
-                <p>🛡️ 마지막 셀프 핑: <span class="highlight">{status.get('last_self_ping_kst')}</span></p>
+                <h2>Current Schedule Status</h2>
+                <p>Current KST Time: <span class="highlight">{current_kst.strftime('%Y-%m-%d %H:%M:%S KST')}</span></p>
+                <p>Current Set Send Time: <span class="highlight">{TARGET_HOUR_KST:02d}:{TARGET_MINUTE_KST:02d} KST</span></p>
+                <p>Next Scheduled Send Time: <span class="highlight">{status.get('next_scheduled_time_kst')}</span></p>
+                <p>Last Successful Send Date: <span class="highlight">{status.get('last_sent_date_kst')}</span></p>
+                <p>🛡️ Last Self-Ping: <span class="highlight">{status.get('last_self_ping_kst')}</span></p>
 
                 <div class="time-setting">
-                    <h2>발송 시간 설정 (KST)</h2>
+                    <h2>Set Send Time (KST)</h2>
                     <form action="/set-time" method="POST">
                         <div class="form-group">
-                            <label for="hour">시 (Hour, 0-23):</label>
+                            <label for="hour">Hour (0-23):</label>
                             <input type="number" id="hour" name="hour" min="0" max="23" value="{TARGET_HOUR_KST}" required>
-                            <label for="minute">분 (Minute, 0-59):</label>
+                            <label for="minute">Minute (0-59):</label>
                             <input type="number" id="minute" name="minute" min="0" max="59" value="{TARGET_MINUTE_KST}" required>
                         </div>
                         <div class="form-group" style="justify-content: flex-end;">
-                            <button type="submit">스케줄 시간 변경</button>
+                            <button type="submit">Update Schedule Time</button>
                         </div>
                     </form>
                 </div>
 
                 <div class="alert">
-                    🔔 **중요**: 이 서비스를 유지하기 위해서는 외부 모니터링 서비스(예: UptimeRobot)를 설정하여 이 URL에 주기적으로(5분마다) 요청을 보내야 합니다.
+                    🔔 **IMPORTANT**: To keep this service alive, you must configure an external monitoring service (e.g., UptimeRobot) to periodically request this URL (every 5 minutes).
                 </div>
             </div>
         </body>
