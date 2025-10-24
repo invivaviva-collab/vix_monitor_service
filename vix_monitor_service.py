@@ -177,24 +177,38 @@ async def plot_vix_sp500(width=6.4, height=4.8) -> Optional[Tuple[io.BytesIO, fl
     [ASYNC WRAPPER] Generates a comparative chart of VIX and S&P 500 closing prices,
     and returns the chart buffer along with the latest data.
     
-    This function handles the retry logic asynchronously.
+    This function handles the retry logic asynchronously and enforces a strict timeout 
+    for the synchronous execution thread.
     """
     logger.info("📈 Starting async data download and chart generation...")
 
     max_retry = 4 
+    # Max time allowed for the plot function (well below the typical 60s gateway timeout)
+    PLOT_TIMEOUT_SECONDS = 50 
     
     for attempt in range(1, max_retry + 1):
         try:
-            logger.info(f"Attempt {attempt}/{max_retry}: Executing data fetch and plot in background thread...")
+            logger.info(f"Attempt {attempt}/{max_retry}: Executing data fetch and plot in background thread with a {PLOT_TIMEOUT_SECONDS}s timeout...")
             
-            # Execute the synchronous function in a separate thread to prevent blocking the event loop
-            plot_result = await asyncio.to_thread(_sync_fetch_and_plot_data, width, height)
+            # ⭐️ Enforce a strict timeout on the background thread execution ⭐️
+            plot_result = await asyncio.wait_for(
+                asyncio.to_thread(_sync_fetch_and_plot_data, width, height),
+                timeout=PLOT_TIMEOUT_SECONDS
+            )
             
             if plot_result:
                 return plot_result
             else:
                 # _sync_fetch_and_plot_data returned None (plotting failed)
                 raise Exception("Synchronous plot generation failed.")
+            
+        except asyncio.TimeoutError:
+            # Handle the specific case where the background thread took too long
+            logger.error(f"❌ Data download/plot exceeded the {PLOT_TIMEOUT_SECONDS}s timeout (Attempt {attempt}).")
+            if attempt == max_retry:
+                logger.error("Max retries exceeded due to timeout. Failed to acquire data.")
+                return None
+            # Continue to exponential backoff and retry
             
         except Exception as e:
             # Handle I/O (e.g., yfinance download failure) or plotting exceptions from the background thread
@@ -382,8 +396,9 @@ async def self_ping_loop():
             await asyncio.sleep(5 * 60) # Wait 5 minutes
             
             try:
-                # HEAD request is lighter than GET.
+                # Use HEAD request as it is the lightest check
                 async with session.head(ping_url, timeout=10) as response:
+                    # A 200 OK status indicates the server is alive and responded to HEAD
                     if response.status == 200:
                         status['last_self_ping_kst'] = datetime.now(KST_TZ).strftime("%Y-%m-%d %H:%M:%S KST")
                         logger.debug(f"✅ Self-ping successful: {status['last_self_ping_kst']}")
@@ -415,7 +430,7 @@ async def startup_event():
     logger.info("🚀 Background scheduling and self-ping loops have started.")
 
 # ---------------------------------------------------------
-# New Endpoint: Set Scheduling Time (Completed in this turn)
+# New Endpoint: Set Scheduling Time
 # ---------------------------------------------------------
 @app.post("/set-time")
 async def set_schedule_time(
@@ -452,12 +467,19 @@ async def set_schedule_time(
 
 
 # ---------------------------------------------------------
-# Root Endpoint (Status Dashboard)
+# Root Endpoint (Status Dashboard) - Now allows GET and HEAD
 # ---------------------------------------------------------
-@app.get("/", response_class=HTMLResponse)
+@app.api_route("/", methods=["GET", "HEAD"], response_class=HTMLResponse)
 async def home_status(request: Request):
-    """Simple status dashboard with an option to change the schedule time."""
+    """Simple status dashboard with an option to change the schedule time.
+    Allows both GET (for browser) and HEAD (for health check/ping)."""
     global status
+    
+    # If the request is a HEAD request, just return a 200 OK without content.
+    if request.method == "HEAD":
+        return HTMLResponse(status_code=200)
+
+    # For GET requests, return the full status page.
     
     # Check if necessary environment variables are set
     config_warning = ""
@@ -506,33 +528,33 @@ async def home_status(request: Request):
                 <p><strong>다음 전송 시각 (KST):</strong> {status['next_scheduled_time_kst']}</p>
                 <p><strong>마지막 전송일:</strong> {status['last_sent_date_kst']}</p>
                 <p><strong>마지막 확인 시각:</strong> {status['last_check_time_kst']}</p>
-                <p><strong>마지막 자체 핑 시각:</strong> {status['last_self_ping_kst']}</p>
-                <p><strong>현재 전송 시간 (KST):</strong> {TARGET_HOUR_KST:02d}:{TARGET_MINUTE_KST:02d}</p>
+                <p><strong>마지막 자체 핑:</strong> {status['last_self_ping_kst']}</p>
+                <p><strong>설정된 전송 시간 (KST):</strong> {current_hour:02d}:{current_minute:02d}</p>
             </div>
 
             {f'<div class="warning"><h3>설정 경고</h3><ul>{config_warning}</ul></div>' if config_warning else ''}
-
-            <h2>전송 시각 변경 (KST)</h2>
+            
+            <h2>전송 시간 변경 (KST)</h2>
             <form method="POST" action="/set-time">
                 <label for="hour">시 (0-23):</label>
-                <input type="number" id="hour" name="hour" min="0" max="23" value="{current_hour}" required>
+                <input type="number" id="hour" name="hour" value="{current_hour}" min="0" max="23" required>
                 
                 <label for="minute">분 (0-59):</label>
-                <input type="number" id="minute" name="minute" min="0" max="59" value="{current_minute}" required>
+                <input type="number" id="minute" name="minute" value="{current_minute}" min="0" max="59" required>
                 
-                <button type="submit">시간 설정 및 재시작</button>
+                <button type="submit">전송 시간 업데이트</button>
             </form>
             
-            <p style="margin-top: 25px; font-size: 0.9em; color: #777;">* 전송 시각 변경 후 다음 전송 시각이 자동으로 재계산됩니다. 재시작 시점에 따라 다음 전송은 오늘 또는 내일로 설정됩니다.</p>
-            <p style="font-size: 0.9em; color: #777;">* 서비스는 **월요일**과 **일요일**에는 전송하지 않습니다 (미국 시장 휴장 및 데이터 불충분). 다음 평일로 자동 연기됩니다.</p>
+            <p style="margin-top: 20px; font-size: 0.9em; color: #666;">
+                *이 서비스는 매일 한 번, 설정된 KST 시간에 맞춰 텔레그램으로 VIX 및 S&P 500 차트를 전송합니다.
+            </p>
         </div>
     </body>
     </html>
     """
-    return HTMLResponse(content=html_content)
+    return HTMLResponse(content=html_content, status_code=200)
 
-# The following standard block is necessary to make the service runnable on cloud platforms like Render.
 if __name__ == "__main__":
+    # If running locally (not via uvicorn/gunicorn, which Render typically uses)
     import uvicorn
-    # Use 0.0.0.0 for all interfaces to be reachable by the platform's proxy
     uvicorn.run(app, host="0.0.0.0", port=SERVER_PORT)
