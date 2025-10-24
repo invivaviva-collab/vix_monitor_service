@@ -9,18 +9,28 @@ from datetime import datetime, timedelta
 from typing import Optional
 from zoneinfo import ZoneInfo
 
+# === [IMPORTANT FIX: Suppress yfinance environment warnings] ===
+# yfinance 캐시 기능을 비활성화하여 Render 환경에서 발생하는 TzCache 경고를 제거합니다.
+import yfinance as yf
+# yfinance의 내부 shared 모듈을 가져와 캐시 설정을 우회적으로 비활성화
+try:
+    import yfinance.shared as shared
+    shared._set_tz_cache_location = lambda *args, **kwargs: None
+except ImportError:
+    pass
+# ===============================================================
+
 # FastAPI imports
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from starlette.responses import RedirectResponse
 
 # Graph/Data related external libraries
-import yfinance as yf
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import matplotlib
 import numpy as np
-import pandas as pd # <-- pandas import 추가
+import pandas as pd
 
 # Matplotlib backend setting (essential for headless server environments)
 matplotlib.use('Agg')
@@ -35,8 +45,8 @@ NY_TZ = ZoneInfo("America/New_York")
 MONITOR_INTERVAL_SECONDS = 60 # Check time every 1 minute
 
 # ⏰ Global State: User-configurable send time (KST)
-TARGET_HOUR_KST = int(os.environ.get('TARGET_HOUR_KST', 13))
-TARGET_MINUTE_KST = int(os.environ.get('TARGET_MINUTE_KST', 45))
+TARGET_HOUR_KST = int(os.environ.get('TARGET_HOUR_KST', 10))
+TARGET_MINUTE_KST = int(os.environ.get('TARGET_MINUTE_KST', 55))
 
 # ⚠️ Load from Environment Variables (Essential for Render) - Retain user-specified hardcoded defaults
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', 'YOUR_BOT_TOKEN_HERE')
@@ -69,7 +79,7 @@ def download_market_data() -> Optional[pd.DataFrame]:
     """
     logger.info("📈 Starting market data download...")
 
-    max_retry = 4 # Maximum 4 attempts
+    max_retry = 6 # Rate limit에 대비해 최대 시도 횟수를 4회에서 6회로 늘림
     tickers = ["^VIX", "^GSPC"]
     start_date = "2025-04-01" # Data start date
     data_all = None
@@ -79,19 +89,27 @@ def download_market_data() -> Optional[pd.DataFrame]:
             logger.info(f"Attempt {attempt}/{max_retry}: Downloading VIX and S&P 500 data (start={start_date})...")
             
             # Download data
-            data_all = yf.download(tickers, start=start_date, progress=False, timeout=20)
+            data_all = yf.download(tickers, start=start_date, progress=False, timeout=20, ignore_tz=True)
             
-            # Basic validation
-            if data_all.empty or data_all['Close'].empty:
-                raise ValueError("Downloaded data is empty.")
+            # ⭐️ [FIX 1: Robust Validation] 다운로드 후 데이터 완전성 검증 ⭐️
+            if data_all.empty or 'Close' not in data_all.columns.names:
+                 raise ValueError("Downloaded data structure is invalid or empty.")
+            
+            # VIX와 GSPC 모두의 Close 컬럼에 유효한 데이터가 있는지 확인
+            vix_close_data = data_all['Close']['^VIX'].dropna()
+            gspc_close_data = data_all['Close']['^GSPC'].dropna()
 
-            logger.info(f"Attempt {attempt}: Data downloaded successfully.")
+            if vix_close_data.empty or gspc_close_data.empty:
+                # 하나라도 데이터가 비어있다면, Rate Limit 등으로 인한 부분 실패로 간주
+                 raise ValueError(f"Downloaded data is incomplete. VIX rows: {len(vix_close_data)}, S&P rows: {len(gspc_close_data)}. Retrying.")
+
+            logger.info(f"Attempt {attempt}: Data downloaded and validated successfully.")
             return data_all # Successful download
             
         except Exception as e:
             logger.warning(f"Data download failed (Attempt {attempt}): {e}")
             if attempt < max_retry:
-                # ⭐️ Apply Exponential Backoff: Wait 2^1=2s, 2^2=4s, 2^3=8s
+                # ⭐️ Apply Exponential Backoff: Wait 2^1=2s, 2^2=4s, 2^3=8s, 2^4=16s, 2^5=32s
                 sleep_time = 2 ** attempt
                 logger.info(f"Applying Exponential Backoff. Waiting {sleep_time} seconds before next retry...")
                 time.sleep(sleep_time)
@@ -254,6 +272,7 @@ async def run_and_send_plot() -> bool:
         vix_data = data_all['Close']['^VIX'].dropna()
         gspc_data = data_all['Close']['^GSPC'].dropna()
         
+        # ⭐️ 이 단계에서는 download_market_data에서 이미 데이터 완전성을 검증했지만, 혹시 모를 경우를 대비해 2차 검증 ⭐️
         if vix_data.empty or gspc_data.empty:
             raise ValueError("Downloaded data is incomplete or empty after cleanup.")
             
@@ -310,7 +329,7 @@ async def run_and_send_plot() -> bool:
         return success
         
     finally:
-        # 5. Memory Cleanup (GUARANTEED cleanup, addressing user concern 2)
+        # 5. Memory Cleanup (GUARANTEED cleanup)
         if plot_buffer:
             plot_buffer.close() 
             logger.info("🗑️ Chart memory buffer closed successfully.")
