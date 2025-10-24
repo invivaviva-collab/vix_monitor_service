@@ -59,65 +59,48 @@ status = {
 # =========================================================
 # --- [2] VIX Plotter Function (Chart Generation Logic) ---
 # =========================================================
-def plot_vix_sp500(width=6.4, height=4.8) -> Optional[Tuple[io.BytesIO, float, float, str]]:
+def _sync_fetch_and_plot_data(width=6.4, height=4.8) -> Optional[Tuple[io.BytesIO, float, float, str]]:
     """
-    Generates a comparative chart of VIX and S&P 500 closing prices,
-    and returns the chart buffer along with the latest data.
+    INTERNAL: Synchronously fetches data using yfinance and generates the chart
+    using Matplotlib. 이 함수는 별도의 스레드에서 실행되도록 설계되었습니다.
+    
+    데이터 다운로드 실패 시 예외(ValueError 등)를 발생시킵니다.
     """
-    logger.info("📈 Starting data download and chart generation...")
-
-    max_retry = 4 
     tickers = ["^VIX", "^GSPC"]
     vix, qqq = None, None
-    latest_vix, latest_gspc, latest_date_utc = 0.0, 0.0, "N/A" 
     
     # Using a fixed start date for consistent comparison
     start_date = "2025-04-01" 
     
-    for attempt in range(1, max_retry + 1):
-        try:
-            logger.info(f"Attempt {attempt}/{max_retry}: Downloading VIX and S&P 500 data (start={start_date})...")
+    logger.info("Executing synchronous data download and chart generation...")
             
-            # Download data using yfinance
-            data_all = yf.download(tickers, start=start_date, progress=False, timeout=20)
+    # --- Data Download (Synchronous I/O) ---
+    # Download data using yfinance
+    data_all = yf.download(tickers, start=start_date, progress=False, timeout=20)
             
-            # Extract Close data
-            vix_df = data_all['Close']['^VIX'].dropna()
-            gspc_df = data_all['Close']['^GSPC'].dropna()
+    # Extract Close data
+    vix_df = data_all['Close']['^VIX'].dropna()
+    gspc_df = data_all['Close']['^GSPC'].dropna()
             
-            # Align common dates
-            common_dates = vix_df.index.intersection(gspc_df.index)
-            vix = vix_df.loc[common_dates]
-            qqq = gspc_df.loc[common_dates]
+    # Align common dates
+    common_dates = vix_df.index.intersection(gspc_df.index)
+    vix = vix_df.loc[common_dates]
+    qqq = gspc_df.loc[common_dates]
 
-            # Data validation
-            if vix.empty or qqq.empty:
-                raise ValueError("Downloaded data is empty after aligning dates.")
+    # Data validation
+    if vix.empty or qqq.empty:
+        raise ValueError("Downloaded data is empty after aligning dates.")
 
-            # ⭐️ Extract latest data for caption ⭐️
-            latest_vix = vix.iloc[-1].item()
-            latest_gspc = qqq.iloc[-1].item()
-            # Use the latest date from either index
-            latest_date_utc = max(vix.index[-1], qqq.index[-1]).strftime('%Y-%m-%d')
-
-            logger.info(f"Attempt {attempt}: Data downloaded successfully (VIX={latest_vix:.2f}, S&P500={latest_gspc:.0f}).")
-            break 
-            
-        except Exception as e:
-            logger.warning(f"Data download failed (Attempt {attempt}): {e}")
-            if attempt < max_retry:
-                # Apply Exponential Backoff
-                sleep_time = 5 ** attempt
-                logger.info(f"Applying Exponential Backoff. Waiting {sleep_time} seconds before next retry...")
-                time.sleep(sleep_time)
-            else:
-                logger.error("Max retries exceeded. Failed to acquire data.")
-                return None
+    # ⭐️ Extract latest data for caption ⭐️
+    latest_vix = vix.iloc[-1].item()
+    latest_gspc = qqq.iloc[-1].item()
+    # Use the latest date from either index
+    latest_date_utc = max(vix.index[-1], qqq.index[-1]).strftime('%Y-%m-%d')
     
-    if vix is None or qqq is None:
-        return None
+    logger.info(f"Data downloaded successfully (VIX={latest_vix:.2f}, S&P500={latest_gspc:.0f}).")
 
-    # Apply final chart design logic
+
+    # --- Chart Generation (CPU-bound) ---
     try:
         plt.style.use('dark_background')
         
@@ -130,7 +113,6 @@ def plot_vix_sp500(width=6.4, height=4.8) -> Optional[Tuple[io.BytesIO, float, f
         ax2.set_facecolor('#2E2E2E')
         
         # Data and colors
-        common_dates = vix.index 
         title_text = f"VIX ({latest_vix:.2f}) vs S&P 500 ({latest_gspc:.0f})"
         vix_color = '#FF6B6B' # VIX color (Red tone)
         qqq_color = '#6BCBFF' # S&P 500 color (Blue tone)
@@ -186,7 +168,47 @@ def plot_vix_sp500(width=6.4, height=4.8) -> Optional[Tuple[io.BytesIO, float, f
 
     except Exception as e:
         logger.error(f"❌ Exception during chart generation: {e}", exc_info=True)
+        # If plotting fails, return None
         return None
+
+
+async def plot_vix_sp500(width=6.4, height=4.8) -> Optional[Tuple[io.BytesIO, float, float, str]]:
+    """
+    [ASYNC WRAPPER] Generates a comparative chart of VIX and S&P 500 closing prices,
+    and returns the chart buffer along with the latest data.
+    
+    This function handles the retry logic asynchronously.
+    """
+    logger.info("📈 Starting async data download and chart generation...")
+
+    max_retry = 4 
+    
+    for attempt in range(1, max_retry + 1):
+        try:
+            logger.info(f"Attempt {attempt}/{max_retry}: Executing data fetch and plot in background thread...")
+            
+            # Execute the synchronous function in a separate thread to prevent blocking the event loop
+            plot_result = await asyncio.to_thread(_sync_fetch_and_plot_data, width, height)
+            
+            if plot_result:
+                return plot_result
+            else:
+                # _sync_fetch_and_plot_data returned None (plotting failed)
+                raise Exception("Synchronous plot generation failed.")
+            
+        except Exception as e:
+            # Handle I/O (e.g., yfinance download failure) or plotting exceptions from the background thread
+            logger.warning(f"Data download/plot failed (Attempt {attempt}): {e}")
+            if attempt < max_retry:
+                # Apply Exponential Backoff using non-blocking sleep
+                sleep_time = 5 ** attempt
+                logger.info(f"Applying Exponential Backoff. Waiting {sleep_time} seconds before next retry...")
+                await asyncio.sleep(sleep_time) # NON-BLOCKING SLEEP
+            else:
+                logger.error("Max retries exceeded. Failed to acquire data.")
+                return None
+    
+    return None
 
 # =========================================================
 # --- [3] Telegram Sending Function (HTTP API) ---
@@ -236,8 +258,8 @@ async def run_and_send_plot() -> bool:
         logger.error("Telegram token or Chat ID is set to default. Skipping send.")
         return False
         
-    # ⭐️ Reflect the change in the return value of plot_vix_sp500 ⭐️
-    plot_result = plot_vix_sp500()
+    # ⭐️ MUST AWAIT the call since plot_vix_sp500 is now an async function ⭐️
+    plot_result = await plot_vix_sp500()
     
     if not plot_result:
         logger.error("Chart generation failed. Skipping send and recalculating next target time.")
