@@ -33,7 +33,7 @@ MONITOR_INTERVAL_SECONDS = 60 # Check time every 1 minute
 
 # ⏰ Global State: User-configurable send time (KST)
 TARGET_HOUR_KST = int(os.environ.get('TARGET_HOUR_KST', 7))
-TARGET_MINUTE_KST = int(os.environ.get('TARGET_MINUTE_KST', 20))
+TARGET_MINUTE_KST = int(os.environ.get('TARGET_MINUTE_KST', 19))
 
 # ⚠️ Load from environment variables (essential for Render environment)
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', 'YOUR_BOT_TOKEN_HERE')
@@ -149,7 +149,7 @@ def _sync_fetch_and_plot_data(width=6.4, height=4.8) -> Optional[Tuple[io.BytesI
         # VIX horizontal lines
         ax2.axhline(y=15, color='yellow', linestyle='--', linewidth=1.2, alpha=0.8)
         ax2.axhline(y=30, color='peru', linestyle='--', linewidth=1.0, alpha=0.8)
-        ax2.axhline(y=40, color='lightGreen', linestyle='--', linewidth=1.2, alpha=0.8)
+        ax2.axhline(y=40, color='yellow', linestyle='--', linewidth=1.2, alpha=0.8)
         
         # Title and minimal margin
         fig.suptitle(title_text, color='white', fontsize=12, fontweight='bold', y=0.98) 
