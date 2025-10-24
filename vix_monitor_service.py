@@ -4,11 +4,12 @@ import asyncio
 import aiohttp
 import io
 import logging
+import time # 👈 지수적 백오프를 위해 time 모듈 추가
 from datetime import datetime, timedelta
 from typing import Optional
 from zoneinfo import ZoneInfo
 
-# FastAPI 관련 임포트 (RedirectResponse, Form, Request 추가)
+# FastAPI 관련 임포트
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from starlette.responses import RedirectResponse
@@ -31,7 +32,7 @@ MONITOR_INTERVAL_SECONDS = 60 # 1분마다 시간 체크
 
 # ⏰ 전역 상태: 사용자가 설정할 수 있는 발송 시간 (KST)
 TARGET_HOUR_KST = int(os.environ.get('TARGET_HOUR_KST', 11))
-TARGET_MINUTE_KST = int(os.environ.get('TARGET_MINUTE_KST', 0))
+TARGET_MINUTE_KST = int(os.environ.get('TARGET_MINUTE_KST', 10))
 
 # ⚠️ 환경 변수에서 로드 (Render 환경에 필수)
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', 'YOUR_BOT_TOKEN_HERE')
@@ -58,14 +59,47 @@ status = {
 # --- [2] VIX Plotter 함수 (그래프 생성 로직) ---
 # =========================================================
 def plot_vix_sp500(width=10, height=6) -> Optional[io.BytesIO]:
-    """VIX와 S&P 500의 6개월 종가 추이를 비교하는 차트를 생성합니다."""
+    """
+    VIX와 S&P 500의 6개월 종가 추이를 비교하는 차트를 생성합니다.
+    (Rate Limit 회피를 위해 지수적 백오프(Exponential Backoff) 로직 사용)
+    """
     logger.info("📈 데이터 다운로드 및 차트 생성 시작...")
+
+    # Rate Limit 회피를 위한 지수적 백오프 재시도 로직
+    max_retry = 4 # 최대 4번 시도 (1차 + 3번 재시도)
+    tickers = ["^VIX", "^GSPC"]
+    data = None
     
+    for attempt in range(1, max_retry + 1):
+        try:
+            logger.info(f"Attempt {attempt}/{max_retry}: Downloading VIX and S&P 500 data...")
+            
+            # 데이터 다운로드 (period="6mo" 사용)
+            data = yf.download(tickers, period="6mo", progress=False, timeout=20)
+            
+            # 데이터 유효성 검사
+            if data.empty or data['Close'].empty or data['Close'][tickers].isnull().all().any():
+                raise ValueError("Downloaded data is empty or contains only NaN values.")
+
+            logger.info(f"Attempt {attempt}: Data downloaded successfully.")
+            break # 성공적으로 다운로드 및 유효성 검사 완료
+            
+        except Exception as e:
+            logger.warning(f"Data download failed (Attempt {attempt}): {e}")
+            if attempt < max_retry:
+                # ⭐️ 지수적 백오프(Exponential Backoff) 적용: 2^1=2s, 2^2=4s, 2^3=8s 대기
+                sleep_time = 2 ** attempt
+                logger.info(f"Applying Exponential Backoff. Waiting {sleep_time} seconds before next retry...")
+                time.sleep(sleep_time)
+            else:
+                logger.error("Max retries exceeded. Failed to acquire data.")
+                return None
+    
+    if data is None:
+        return None
+
+    # 데이터 정리 및 플로팅 시작
     try:
-        # 데이터 다운로드: 6개월치 (^VIX: VIX 지수, ^GSPC: S&P 500)
-        tickers = ["^VIX", "^GSPC"]
-        data = yf.download(tickers, period="6mo", progress=False)
-        
         vix_data = data['Close']['^VIX'].dropna()
         gspc_data = data['Close']['^GSPC'].dropna()
 
@@ -162,18 +196,23 @@ async def run_and_send_plot() -> bool:
         return False
     
     # 임시 데이터 가져오기 (캡션을 위해)
+    # ⚠️ 이 부분도 실패할 수 있으므로, 재시도 로직을 적용한 plot_vix_sp500 대신,
+    # 데이터를 이미 가져왔다고 가정하거나, 최소한의 정보만 사용합니다.
+    # 여기서는 안전하게 짧은 기간 데이터로 최신 정보를 가져오도록 유지합니다.
+    latest_vix, latest_gspc, latest_date_utc = "N/A", "N/A", "최신 데이터 확보 실패"
     try:
         data = yf.download(["^VIX", "^GSPC"], period="5d", progress=False)
         vix_data = data['Close']['^VIX'].dropna()
         gspc_data = data['Close']['^GSPC'].dropna()
 
-        latest_vix = vix_data.iloc[-1]
-        latest_gspc = gspc_data.iloc[-1]
-        latest_date_utc = vix_data.index[-1].strftime('%Y-%m-%d')
+        if not vix_data.empty and not gspc_data.empty:
+            latest_vix = vix_data.iloc[-1].item()
+            latest_gspc = gspc_data.iloc[-1].item()
+            # VIX와 GSPC의 마지막 인덱스 중 더 최근 날짜를 사용 (일반적으로 같음)
+            latest_date_utc = max(vix_data.index[-1], gspc_data.index[-1]).strftime('%Y-%m-%d')
     except Exception:
-        latest_vix = "N/A"
-        latest_gspc = "N/A"
-        latest_date_utc = "최신 데이터 확보 실패"
+        logger.warning("캡션에 사용할 최신 VIX/S&P 500 데이터 확보 실패.")
+
 
     caption = (
         f"**[일간 변동성 지수 모니터링]**\n"
@@ -300,7 +339,7 @@ async def startup_event():
     # 메인 스케줄링 루프
     asyncio.create_task(main_monitor_loop()) 
     # 슬립 방지 보조용 셀프 핑 루프
-    asyncio.create_task(self_ping_loop())    
+    asyncio.create_task(self_ping_loop())   
     logger.info("🚀 백그라운드 스케줄링 및 셀프 핑 루프가 시작되었습니다.")
 
 # ---------------------------------------------------------
