@@ -30,8 +30,8 @@ KST_TZ = ZoneInfo("Asia/Seoul")
 MONITOR_INTERVAL_SECONDS = 60 # 1분마다 시간 체크
 
 # ⏰ 전역 상태: 사용자가 설정할 수 있는 발송 시간 (KST)
-TARGET_HOUR_KST = int(os.environ.get('TARGET_HOUR_KST', 10))
-TARGET_MINUTE_KST = int(os.environ.get('TARGET_MINUTE_KST', 50))
+TARGET_HOUR_KST = int(os.environ.get('TARGET_HOUR_KST', 11))
+TARGET_MINUTE_KST = int(os.environ.get('TARGET_MINUTE_KST', 0))
 
 # ⚠️ 환경 변수에서 로드 (Render 환경에 필수)
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', 'YOUR_BOT_TOKEN_HERE')
