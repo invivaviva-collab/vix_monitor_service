@@ -45,7 +45,7 @@ NY_TZ = ZoneInfo("America/New_York")
 MONITOR_INTERVAL_SECONDS = 60 # Check time every 1 minute
 
 # ⏰ Global State: User-configurable send time (KST)
-TARGET_HOUR_KST = int(os.environ.get('TARGET_HOUR_KST', 10))
+TARGET_HOUR_KST = int(os.environ.get('TARGET_HOUR_KST', 13))
 TARGET_MINUTE_KST = int(os.environ.get('TARGET_MINUTE_KST', 55))
 
 # ⚠️ Load from Environment Variables (Essential for Render) - Retain user-specified hardcoded defaults
@@ -109,9 +109,10 @@ def download_market_data() -> Optional[pd.DataFrame]:
         except Exception as e:
             logger.warning(f"Data download failed (Attempt {attempt}): {e}")
             if attempt < max_retry:
-                # ⭐️ Apply Exponential Backoff: Wait 2^1=2s, 2^2=4s, 2^3=8s, 2^4=16s, 2^5=32s
-                sleep_time = 2 ** attempt
-                logger.info(f"Applying Exponential Backoff. Waiting {sleep_time} seconds before next retry...")
+                # ⭐️ Apply Aggressive Exponential Backoff: Wait 10s, 20s, 40s, 80s, 160s... 
+                # 하루에 한 번만 실행되므로, Rate Limit 해제를 위해 충분히 긴 간격을 부여합니다.
+                sleep_time = 10 * (2 ** (attempt - 1)) # Starts at 10s, 20s, 40s, 80s, 160s, 320s
+                logger.info(f"Applying Aggressive Exponential Backoff. Waiting {sleep_time} seconds before next retry...")
                 time.sleep(sleep_time)
             else:
                 logger.error("Max retries exceeded. Failed to acquire data.")
