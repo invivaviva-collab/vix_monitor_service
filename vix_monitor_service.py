@@ -131,7 +131,7 @@ def _sync_fetch_and_plot_data(width=6.4, height=4.8) -> Optional[Tuple[io.BytesI
 
         # Y-axis label setting
         ax1.set_ylabel('S&P 500 Index', color=qqq_color, fontsize=12, fontweight='bold', labelpad=5)
-        ax2.set_ylabel('VIX', color=vix_color, fontsize=12, fontweight='bold', labelpad=5)
+        ax2.set_ylabel('VIX (Volatility)', color=vix_color, fontsize=12, fontweight='bold', labelpad=5)
         
         # Add VIX level annotations and horizontal lines
         try:
