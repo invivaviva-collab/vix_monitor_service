@@ -33,7 +33,7 @@ MONITOR_INTERVAL_SECONDS = 60 # 1분마다 시간 체크
 
 # ⏰ 전역 상태: 사용자가 설정할 수 있는 발송 시간 (KST)
 TARGET_HOUR_KST = int(os.environ.get('TARGET_HOUR_KST', 14))
-TARGET_MINUTE_KST = int(os.environ.get('TARGET_MINUTE_KST', 20))
+TARGET_MINUTE_KST = int(os.environ.get('TARGET_MINUTE_KST', 30))
 
 # ⚠️ 환경 변수에서 로드 (Render 환경에 필수) - 사용자가 지정한 하드코딩 값 유지
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', 'YOUR_BOT_TOKEN_HERE')
@@ -85,6 +85,7 @@ def plot_vix_sp500(width=6.4, height=4.8) -> Optional[io.BytesIO]:
             
             # Close 데이터 추출
             vix_df = data_all['Close']['^VIX'].dropna()
+            time.sleep(2)  # ⭐️ 2초 텀 추가
             gspc_df = data_all['Close']['^GSPC'].dropna()
             
             # 공통 날짜 맞추기
