@@ -32,8 +32,8 @@ KST_TZ = ZoneInfo("Asia/Seoul")
 MONITOR_INTERVAL_SECONDS = 60 # 1분마다 시간 체크
 
 # ⏰ 전역 상태: 사용자가 설정할 수 있는 발송 시간 (KST)
-TARGET_HOUR_KST = int(os.environ.get('TARGET_HOUR_KST', 15))
-TARGET_MINUTE_KST = int(os.environ.get('TARGET_MINUTE_KST', 15))
+TARGET_HOUR_KST = int(os.environ.get('TARGET_HOUR_KST', 7))
+TARGET_MINUTE_KST = int(os.environ.get('TARGET_MINUTE_KST', 20))
 
 # ⚠️ 환경 변수에서 로드 (Render 환경에 필수) - 사용자가 지정한 하드코딩 값 유지
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', 'YOUR_BOT_TOKEN_HERE')
@@ -106,7 +106,7 @@ def plot_vix_sp500(width=6.4, height=4.8) -> Optional[Tuple[io.BytesIO, float, f
             logger.warning(f"Data download failed (Attempt {attempt}): {e}")
             if attempt < max_retry:
                 # ⭐️ 지수적 백오프(Exponential Backoff) 적용: 2^1=2s, 2^2=4s, 2^3=8s 대기
-                sleep_time = 2 ** attempt
+                sleep_time = 5 ** attempt
                 logger.info(f"Applying Exponential Backoff. Waiting {sleep_time} seconds before next retry...")
                 time.sleep(sleep_time)
             else:
