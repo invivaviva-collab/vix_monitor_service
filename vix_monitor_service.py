@@ -5,12 +5,13 @@ import aiohttp
 import io
 import logging
 from datetime import datetime, timedelta
-from typing import Optional, Tuple
+from typing import Optional
 from zoneinfo import ZoneInfo
 
-# FastAPI 관련 임포트 (NameError 해결)
-from fastapi import FastAPI
+# FastAPI 관련 임포트 (RedirectResponse, Form, Request 추가)
+from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse
+from starlette.responses import RedirectResponse
 
 # 그래프/데이터 관련 외부 라이브러리
 import yfinance as yf
@@ -22,13 +23,13 @@ import matplotlib
 matplotlib.use('Agg')
 
 # =========================================================
-# --- [1] 설정 및 환경 변수 로드 ---
+# --- [1] 설정 및 환경 변수 로드 및 전역 상태 ---
 # =========================================================
-# 한국 시간 (KST)은 UTC+9입니다.
+# 한국 시간 (KST) 타임존 설정
 KST_TZ = ZoneInfo("Asia/Seoul")
 MONITOR_INTERVAL_SECONDS = 60 # 1분마다 시간 체크
 
-# ⏰ 사용자가 원하는 발송 시간 설정 (KST)
+# ⏰ 전역 상태: 사용자가 설정할 수 있는 발송 시간 (KST)
 TARGET_HOUR_KST = int(os.environ.get('TARGET_HOUR_KST', 10))
 TARGET_MINUTE_KST = int(os.environ.get('TARGET_MINUTE_KST', 50))
 
@@ -41,11 +42,11 @@ SERVER_PORT = int(os.environ.get("PORT", 8000))
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+# 특수 문자 오류 제거
 if 'YOUR_BOT_TOKEN_HERE' in TELEGRAM_BOT_TOKEN or TELEGRAM_TARGET_CHAT_ID == '-1000000000':
     logger.warning("⚠️ 경고: TELEGRAM_BOT_TOKEN 또는 CHAT_ID가 기본값입니다. 환경 변수를 설정해주세요.")
 
 # 서버 RAM에서 상태 유지 (Render 재시작 시 초기화될 수 있음)
-# next_scheduled_time_kst를 추가하여 다음 발송 시간을 명확히 추적
 status = {
     "last_sent_date_kst": "1970-01-01", 
     "last_check_time_kst": "N/A",
@@ -149,7 +150,12 @@ async def send_photo_via_http(chat_id: str, photo_bytes: io.BytesIO, caption: st
 async def run_and_send_plot() -> bool:
     """차트 생성 및 전송의 전체 프로세스를 실행합니다."""
     global status
-
+    global TARGET_HOUR_KST, TARGET_MINUTE_KST # 캡션에 현재 설정된 시간 반영
+    
+    if 'YOUR_BOT_TOKEN_HERE' in TELEGRAM_BOT_TOKEN or TELEGRAM_TARGET_CHAT_ID == '-1000000000':
+        logger.error("텔레그램 토큰 또는 Chat ID가 기본값입니다. 발송을 건너뜁니다.")
+        return False
+        
     plot_buffer = plot_vix_sp500()
     if not plot_buffer:
         logger.error("차트 생성 실패로 인해 전송을 건너뜁니다.")
@@ -192,7 +198,9 @@ async def run_and_send_plot() -> bool:
 # --- [4] 스케줄링 및 루프 로직 ---
 # =========================================================
 def calculate_next_target_time(now_kst: datetime) -> datetime:
-    """현재 시간을 기준으로 다음 발송 목표 시간 (KST)을 계산합니다."""
+    """현재 시간을 기준으로 다음 발송 목표 시간 (KST)을 계산합니다. (전역 변수 사용)"""
+    global TARGET_HOUR_KST, TARGET_MINUTE_KST
+    
     target_time_today = now_kst.replace(
         hour=TARGET_HOUR_KST, 
         minute=TARGET_MINUTE_KST, 
@@ -227,7 +235,6 @@ async def main_monitor_loop():
         status['last_check_time_kst'] = current_kst.strftime("%Y-%m-%d %H:%M:%S KST")
         
         # 발송 조건 확인 (하루에 한 번, 지정된 시간에 발송)
-        # 현재 시간이 목표 시간 ±30초 이내이고, 오늘 이미 발송하지 않았을 경우
         target_date_kst = next_target_time_kst.strftime("%Y-%m-%d")
 
         if current_kst >= next_target_time_kst and \
@@ -246,14 +253,13 @@ async def main_monitor_loop():
             
         elif current_kst.day != next_target_time_kst.day and \
              current_kst.hour > TARGET_HOUR_KST + 1:
-            # 다음 목표 날짜가 현재 날짜를 지나쳤는데 아직 업데이트가 안 된 경우 (예: 서버 재시작 직후)
+            # 목표 날짜가 현재 날짜를 지나쳤는데 아직 업데이트가 안 된 경우 (예: 서버 재시작 직후)
             next_target_time_kst = calculate_next_target_time(current_kst)
             status['next_scheduled_time_kst'] = next_target_time_kst.strftime("%Y-%m-%d %H:%M:%S KST")
 
 async def self_ping_loop():
     """
     [내부용 슬립 방지] 5분마다 내부적으로 자신의 Health Check 엔드포인트에 핑을 보내는 루프.
-    서버의 내부 활동성을 유지하고 스케줄러가 안정적으로 작동하도록 돕습니다.
     """
     global status
     # Render 내부에서 자신의 IP/포트로 요청
@@ -297,16 +303,55 @@ async def startup_event():
     asyncio.create_task(self_ping_loop())    
     logger.info("🚀 백그라운드 스케줄링 및 셀프 핑 루프가 시작되었습니다.")
 
-# Health Check Endpoint (외부 모니터링 서비스 및 사용자가 현재 상태 확인용)
-# GET 요청에는 상태 HTML을, HEAD 요청에는 간단한 JSON/응답을 제공하여 가볍게 만듭니다.
+# ---------------------------------------------------------
+# 새로운 엔드포인트: 스케줄링 시간 설정
+# ---------------------------------------------------------
+@app.post("/set-time")
+async def set_schedule_time(
+    hour: str = Form(...), 
+    minute: str = Form(...) 
+):
+    """사용자가 입력한 KST 시간을 저장하고 다음 스케줄 시간을 업데이트합니다."""
+    global TARGET_HOUR_KST, TARGET_MINUTE_KST
+    global status
+
+    try:
+        hour_int = int(hour)
+        minute_int = int(minute)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="시간과 분은 정수여야 합니다.")
+        
+    # 유효성 검사
+    if not (0 <= hour_int <= 23 and 0 <= minute_int <= 59):
+        raise HTTPException(status_code=400, detail="유효하지 않은 시간(0-23) 또는 분(0-59)입니다.")
+        
+    # 전역 변수 업데이트
+    TARGET_HOUR_KST = hour_int
+    TARGET_MINUTE_KST = minute_int
+    
+    # 변경 사항을 즉시 반영하여 다음 목표 시간 재계산
+    now_kst = datetime.now(KST_TZ)
+    next_target_time_kst = calculate_next_target_time(now_kst)
+    status['next_scheduled_time_kst'] = next_target_time_kst.strftime("%Y-%m-%d %H:%M:%S KST")
+
+    logger.info(f"⏰ 스케줄링 시간 변경됨: {TARGET_HOUR_KST:02d}:{TARGET_MINUTE_KST:02d} KST. 다음 발송 시간 업데이트됨: {status['next_scheduled_time_kst']}")
+    
+    # 상태 페이지로 리다이렉트 (303 See Other)
+    return RedirectResponse(url="/", status_code=303)
+
+# ---------------------------------------------------------
+# Health Check Endpoint (Request 객체 추가 및 HEAD 처리 로직 수정)
+# ---------------------------------------------------------
 @app.get("/")
-@app.head("/") 
-async def health_check():
+@app.head("/")
+async def health_check(request: Request): # 👈 Request 객체를 인수로 받음
     """Render Free Tier의 Spin Down을 방지하기 위한 Health Check 엔드포인트."""
+    global TARGET_HOUR_KST, TARGET_MINUTE_KST
     current_kst = datetime.now(KST_TZ)
     
     # HEAD 요청의 경우 간단한 응답만 반환하여 부하 최소화
-    if app.requests.get("/").scope["method"] == "HEAD":
+    # request.method로 요청 방식을 확인합니다.
+    if request.method == "HEAD":
         return {"status": "ok"}
         
     status_html = f"""
@@ -315,21 +360,46 @@ async def health_check():
             <title>VIX Scheduler Status (KST)</title>
             <style>
                 body {{ font-family: 'Arial', sans-serif; background-color: #f4f7f6; color: #333; text-align: center; padding: 50px; }}
-                .container {{ background-color: #fff; padding: 30px; border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); display: inline-block; text-align: left; max-width: 500px; width: 90%; }}
+                .container {{ background-color: #fff; padding: 30px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); display: inline-block; text-align: left; max-width: 600px; width: 90%; }}
                 h1 {{ color: #2ecc71; border-bottom: 2px solid #eee; padding-bottom: 10px; }}
+                h2 {{ color: #3498db; margin-top: 25px; border-bottom: 1px solid #eee; padding-bottom: 5px; }}
                 p {{ margin: 10px 0; line-height: 1.5; }}
                 .highlight {{ font-weight: bold; color: #3498db; background-color: #ecf0f1; padding: 2px 5px; border-radius: 3px; }}
                 .alert {{ color: #e74c3c; font-weight: bold; margin-top: 20px; padding: 10px; border: 1px dashed #e74c3c; border-radius: 5px; }}
+                .form-group {{ display: flex; align-items: center; gap: 10px; margin-bottom: 15px; }}
+                .form-group label {{ font-weight: bold; width: 120px; }}
+                .form-group input {{ padding: 8px; border: 1px solid #ccc; border-radius: 5px; width: 60px; text-align: center; }}
+                .form-group button {{ background-color: #3498db; color: white; padding: 8px 15px; border: none; border-radius: 5px; cursor: pointer; transition: background-color 0.3s; }}
+                .form-group button:hover {{ background-color: #2980b9; }}
+                .time-setting {{ margin-top: 20px; padding: 15px; border: 1px solid #ddd; border-radius: 5px; }}
             </style>
         </head>
         <body>
             <div class="container">
-                <h1>✅ 스케줄러 상태: 활성 (Active)</h1>
+                <h1>✅ VIX 스케줄러 상태 (KST)</h1>
+
+                <h2>현재 스케줄 상태</h2>
                 <p>현재 KST 시간: <span class="highlight">{current_kst.strftime('%Y-%m-%d %H:%M:%S KST')}</span></p>
+                <p>현재 설정 발송 시간: <span class="highlight">{TARGET_HOUR_KST:02d}:{TARGET_MINUTE_KST:02d} KST</span></p>
                 <p>다음 발송 예정 시간: <span class="highlight">{status.get('next_scheduled_time_kst')}</span></p>
                 <p>마지막 성공 발송 날짜: <span class="highlight">{status.get('last_sent_date_kst')}</span></p>
-                <p>마지막 시간 확인: <span class="highlight">{status.get('last_check_time_kst')}</span></p>
                 <p>🛡️ 마지막 셀프 핑: <span class="highlight">{status.get('last_self_ping_kst')}</span></p>
+
+                <div class="time-setting">
+                    <h2>발송 시간 설정 (KST)</h2>
+                    <form action="/set-time" method="POST">
+                        <div class="form-group">
+                            <label for="hour">시 (Hour, 0-23):</label>
+                            <input type="number" id="hour" name="hour" min="0" max="23" value="{TARGET_HOUR_KST}" required>
+                            <label for="minute">분 (Minute, 0-59):</label>
+                            <input type="number" id="minute" name="minute" min="0" max="59" value="{TARGET_MINUTE_KST}" required>
+                        </div>
+                        <div class="form-group" style="justify-content: flex-end;">
+                            <button type="submit">스케줄 시간 변경</button>
+                        </div>
+                    </form>
+                </div>
+
                 <div class="alert">
                     🔔 **중요**: 이 서비스를 유지하기 위해서는 외부 모니터링 서비스(예: UptimeRobot)를 설정하여 이 URL에 주기적으로(5분마다) 요청을 보내야 합니다.
                 </div>
