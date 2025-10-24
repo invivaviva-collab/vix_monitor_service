@@ -4,7 +4,7 @@ import asyncio
 import aiohttp
 import io
 import logging
-import time # 👈 지수적 백오프를 위해 time 모듈 추가
+import time
 from datetime import datetime, timedelta
 from typing import Optional
 from zoneinfo import ZoneInfo
@@ -19,6 +19,7 @@ import yfinance as yf
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import matplotlib
+import numpy as np
 
 # Matplotlib 백엔드 설정 (헤드리스 서버 환경을 위해 필수)
 matplotlib.use('Agg')
@@ -31,10 +32,10 @@ KST_TZ = ZoneInfo("Asia/Seoul")
 MONITOR_INTERVAL_SECONDS = 60 # 1분마다 시간 체크
 
 # ⏰ 전역 상태: 사용자가 설정할 수 있는 발송 시간 (KST)
-TARGET_HOUR_KST = int(os.environ.get('TARGET_HOUR_KST', 11))
+TARGET_HOUR_KST = int(os.environ.get('TARGET_HOUR_KST', 12))
 TARGET_MINUTE_KST = int(os.environ.get('TARGET_MINUTE_KST', 10))
 
-# ⚠️ 환경 변수에서 로드 (Render 환경에 필수)
+# ⚠️ 환경 변수에서 로드 (Render 환경에 필수) - 사용자가 지정한 하드코딩 값 유지
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', 'YOUR_BOT_TOKEN_HERE')
 TELEGRAM_TARGET_CHAT_ID = os.environ.get('TELEGRAM_TARGET_CHAT_ID', '-1000000000')
 SERVER_PORT = int(os.environ.get("PORT", 8000))
@@ -47,7 +48,7 @@ logger = logging.getLogger(__name__)
 if 'YOUR_BOT_TOKEN_HERE' in TELEGRAM_BOT_TOKEN or TELEGRAM_TARGET_CHAT_ID == '-1000000000':
     logger.warning("⚠️ 경고: TELEGRAM_BOT_TOKEN 또는 CHAT_ID가 기본값입니다. 환경 변수를 설정해주세요.")
 
-# 서버 RAM에서 상태 유지 (Render 재시작 시 초기화될 수 있음)
+# 💾 서버 RAM에서 상태 유지 (Render 재시작 시 초기화될 수 있음 - 디스크 미사용)
 status = {
     "last_sent_date_kst": "1970-01-01", 
     "last_check_time_kst": "N/A",
@@ -56,32 +57,43 @@ status = {
 }
 
 # =========================================================
-# --- [2] VIX Plotter 함수 (그래프 생성 로직) ---
+# --- [2] VIX Plotter 함수 (그래프 생성 로직) - Render 안정화 적용 ---
 # =========================================================
-def plot_vix_sp500(width=10, height=6) -> Optional[io.BytesIO]:
+def plot_vix_sp500(width=6.4, height=4.8) -> Optional[io.BytesIO]:
     """
-    VIX와 S&P 500의 6개월 종가 추이를 비교하는 차트를 생성합니다.
-    (Rate Limit 회피를 위해 지수적 백오프(Exponential Backoff) 로직 사용)
+    VIX와 S&P 500의 종가 추이를 비교하는 차트를 생성합니다.
+    Rate Limit 회피를 위한 지수적 백오프 재시도 로직이 적용되어 있습니다.
     """
     logger.info("📈 데이터 다운로드 및 차트 생성 시작...")
 
     # Rate Limit 회피를 위한 지수적 백오프 재시도 로직
     max_retry = 4 # 최대 4번 시도 (1차 + 3번 재시도)
     tickers = ["^VIX", "^GSPC"]
-    data = None
+    vix, qqq = None, None
+    
+    start_date = "2025-04-01" 
     
     for attempt in range(1, max_retry + 1):
         try:
-            logger.info(f"Attempt {attempt}/{max_retry}: Downloading VIX and S&P 500 data...")
+            logger.info(f"Attempt {attempt}/{max_retry}: Downloading VIX and S&P 500 data (start={start_date})...")
             
-            # 데이터 다운로드 (period="6mo" 사용)
-            data = yf.download(tickers, period="6mo", progress=False, timeout=20)
+            # 데이터 다운로드 (period 대신 start 사용)
+            data_all = yf.download(tickers, start=start_date, progress=False, timeout=20)
             
-            # 데이터 유효성 검사
-            if data.empty or data['Close'].empty or data['Close'][tickers].isnull().all().any():
-                raise ValueError("Downloaded data is empty or contains only NaN values.")
+            # Close 데이터 추출
+            vix_df = data_all['Close']['^VIX'].dropna()
+            gspc_df = data_all['Close']['^GSPC'].dropna()
+            
+            # 공통 날짜 맞추기
+            common_dates = vix_df.index.intersection(gspc_df.index)
+            vix = vix_df.loc[common_dates]
+            qqq = gspc_df.loc[common_dates]
 
-            logger.info(f"Attempt {attempt}: Data downloaded successfully.")
+            # 데이터 유효성 검사
+            if vix.empty or qqq.empty:
+                raise ValueError("Downloaded data is empty after aligning dates.")
+
+            logger.info(f"Attempt {attempt}: Data downloaded successfully (VIX={vix.iloc[-1]:.2f}, S&P500={qqq.iloc[-1]:.0f}).")
             break # 성공적으로 다운로드 및 유효성 검사 완료
             
         except Exception as e:
@@ -95,54 +107,74 @@ def plot_vix_sp500(width=10, height=6) -> Optional[io.BytesIO]:
                 logger.error("Max retries exceeded. Failed to acquire data.")
                 return None
     
-    if data is None:
+    if vix is None or qqq is None:
         return None
 
-    # 데이터 정리 및 플로팅 시작
+    # 최종 확정된 차트 디자인 로직 적용 (그래프 로직은 변경 없음)
     try:
-        vix_data = data['Close']['^VIX'].dropna()
-        gspc_data = data['Close']['^GSPC'].dropna()
-
-        if vix_data.empty or gspc_data.empty:
-            logger.error("데이터 수집 실패: VIX 또는 S&P 500 데이터가 비어있습니다.")
-            return None
-
-        # 듀얼 축 플롯 생성
-        plt.style.use('seaborn-v0_8-whitegrid')
-        fig, ax1 = plt.subplots(figsize=(width, height))
+        # 폰트 설정 제거 (서버 환경 안정화를 위해)
+        plt.style.use('dark_background')
         
-        # 첫 번째 축: VIX (좌측)
-        color_vix = '#0070FF' # 파란색
-        ax1.set_xlabel('날짜', fontsize=10)
-        ax1.set_ylabel('VIX (좌측)', color=color_vix, fontsize=12, fontweight='bold')
-        ax1.plot(vix_data.index, vix_data.values, color=color_vix, linewidth=2, label='VIX (변동성)', alpha=0.8)
-        ax1.tick_params(axis='y', labelcolor=color_vix)
-        ax1.yaxis.set_major_formatter(plt.FormatStrFormatter('%.2f'))
-        ax1.grid(axis='y', linestyle='--', alpha=0.5)
-
-        # 두 번째 축: S&P 500 (우측)
-        ax2 = ax1.twinx()  
-        color_gspc = '#FF4500' # 주황색
-        ax2.set_ylabel('S&P 500 (우측)', color=color_gspc, fontsize=12, fontweight='bold')
-        ax2.plot(gspc_data.index, gspc_data.values, color=color_gspc, linewidth=2, label='S&P 500 (지수)', linestyle='-')
-        ax2.tick_params(axis='y', labelcolor=color_gspc)
-        ax2.yaxis.set_major_formatter(plt.FormatStrFormatter('%.0f'))
-
-        # X축 날짜 포맷팅
-        ax1.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d'))
-        ax1.xaxis.set_major_locator(mdates.MonthLocator(interval=1))
+        fig, ax1 = plt.subplots(figsize=(width, height)) 
+        ax2 = ax1.twinx()
         
-        # 제목 설정
-        plt.title('VIX와 S&P 500 6개월 추이 비교', fontsize=14, fontweight='bold')
-        fig.tight_layout() 
+        # 배경색 설정
+        fig.patch.set_facecolor('#222222')
+        ax1.set_facecolor('#2E2E2E')
+        ax2.set_facecolor('#2E2E2E')
         
-        # 메모리 버퍼에 PNG 이미지로 저장
+        # 데이터 및 색상
+        common_dates = vix.index # 재정의
+        last_vix_price = vix.iloc[-1].item()
+        last_qqq_price = qqq.iloc[-1].item()
+        title_text = f"VIX ({last_vix_price:.2f}) vs S&P 500 ({last_qqq_price:.2f})"
+        vix_color = '#FF6B6B' # VIX 색상 (빨간색 계열)
+        qqq_color = '#6BCBFF' # S&P 500 색상 (파란색 계열)
+        new_fontsize = 8 * 1.3
+        
+        # 플로팅
+        ax2.plot(common_dates, vix.values, color=vix_color, linewidth=1.5)
+        ax1.plot(common_dates, qqq.values, color=qqq_color, linewidth=1.5)
+        
+        # X축 날짜 포맷 및 간격 설정
+        formatter = mdates.DateFormatter('%Y-%m-%d') 
+        ax1.xaxis.set_major_formatter(formatter)
+        ax1.xaxis.set_major_locator(mdates.MonthLocator(interval=4)) # 4개월 간격 유지
+        fig.autofmt_xdate(rotation=45)
+
+        # Y축 레이블 설정
+        ax1.set_ylabel('S&P 500', color=qqq_color, fontsize=12, fontweight='bold', labelpad=15)
+        ax2.set_ylabel('VIX', color=vix_color, fontsize=12, fontweight='bold', labelpad=15)
+        
+        # VIX 레벨 주석 및 수평선 추가
+        try:
+            # 전체 데이터 기간의 90% 지점 날짜를 찾습니다.
+            new_text_x_pos = common_dates[int(len(common_dates)*0.9)]
+        except:
+             # 데이터가 너무 적을 경우의 안전 장치
+             new_text_x_pos = common_dates[-1] + timedelta(days=1)
+        
+        # VIX 주석 (오른쪽 정렬)
+        ax2.text(new_text_x_pos, 15.5, "VIX 15 (탐욕/매도)", color='yellow', fontsize=new_fontsize, verticalalignment='bottom', horizontalalignment='right', fontweight='bold')
+        ax2.text(new_text_x_pos, 30.5, "VIX 30 (경고)", color='peru', fontsize=new_fontsize, verticalalignment='bottom', horizontalalignment='right', fontweight='bold')
+        ax2.text(new_text_x_pos, 40.5, "VIX 40 (공포/매수)", color='lightGreen', fontsize=new_fontsize, verticalalignment='bottom', horizontalalignment='right', fontweight='bold')
+        
+        # VIX 수평선
+        ax2.axhline(y=15, color='yellow', linestyle='--', linewidth=1.2, alpha=0.8)
+        ax2.axhline(y=30, color='peru', linestyle='--', linewidth=1.0, alpha=0.8)
+        ax2.axhline(y=40, color='lightGreen', linestyle='--', linewidth=1.2, alpha=0.8)
+        
+        # 제목 및 여백 최소화
+        fig.suptitle(title_text, color='white', fontsize=12, fontweight='bold', y=0.98) 
+        fig.tight_layout(rect=[0.025, 0.05, 0.975, 1.0]) 
+        
+        # ⭐️ 메모리 버퍼에 PNG 이미지로 저장 (디스크 미사용 핵심) ⭐️
         plot_data = io.BytesIO()
-        plt.savefig(plot_data, format='png', bbox_inches='tight', dpi=100)
+        plt.savefig(plot_data, format='png', dpi=100, bbox_inches='tight', pad_inches=0.1) 
         plot_data.seek(0)
         
         plt.close(fig) # **매우 중요: 메모리 누수 방지**
-        logger.info("✅ 차트 생성 완료.")
+        logger.info("✅ 차트 생성 완료 (메모리 저장).")
         return plot_data
 
     except Exception as e:
@@ -156,35 +188,42 @@ async def send_photo_via_http(chat_id: str, photo_bytes: io.BytesIO, caption: st
     """텔레그램 봇으로 차트 이미지를 발송합니다."""
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
     
-    data = {
-        'chat_id': chat_id,
-        'caption': caption,
-        'parse_mode': 'Markdown'
-    }
-    
-    files = {
-        'photo': ('vix_gspc_chart.png', photo_bytes, 'image/png')
-    }
-    
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) as session:
+    data = aiohttp.FormData()
+    data.add_field('chat_id', chat_id)
+    data.add_field('caption', caption)
+    data.add_field('parse_mode', 'Markdown')
+    # ⭐️ io.BytesIO 객체를 직접 photo 필드에 전달 ⭐️
+    data.add_field('photo', 
+                   photo_bytes, 
+                   filename='vix_gspc_chart.png', 
+                   content_type='image/png')
+
+    # 재시도 로직 추가 (네트워크 문제 대비)
+    for attempt in range(3):
         try:
-            logger.info(f"텔레그램 발송 요청 시작 (Chat ID: {chat_id})...")
-            async with session.post(url, data=data, files=files) as response:
-                if response.status == 200:
-                    logger.info("✅ 텔레그램 발송 성공!")
-                    return True
-                else:
-                    response_text = await response.text()
-                    logger.error(f"❌ 텔레그램 발송 실패 (Status: {response.status}, Response: {response_text})")
-                    return False
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) as session:
+                logger.info(f"텔레그램 발송 요청 시작 (시도 {attempt + 1}/3, Chat ID: {chat_id})...")
+                async with session.post(url, data=data) as response:
+                    response.raise_for_status() # HTTP 오류 발생 시 예외 발생
+                    response_json = await response.json()
+                    if response_json.get('ok'):
+                        logger.info("✅ 텔레그램 발송 성공!")
+                        return True
+                    else:
+                        error_desc = response_json.get('description', 'Unknown Error')
+                        raise Exception(f"Telegram API Error: {error_desc}")
+                        
         except Exception as e:
-            logger.error(f"❌ 텔레그램 발송 중 예외 발생: {e}", exc_info=True)
-            return False
+            logger.warning(f"❌ 텔레그램 전송 중 오류 발생 (시도 {attempt + 1}/3): {e}. 잠시 후 재시도.")
+            if attempt < 2:
+                await asyncio.sleep(2 ** attempt) # Exponential Backoff: 1s, 2s 대기
+            
+    logger.error("텔레그램 발송 최종 실패.")
+    return False
 
 async def run_and_send_plot() -> bool:
     """차트 생성 및 전송의 전체 프로세스를 실행합니다."""
     global status
-    global TARGET_HOUR_KST, TARGET_MINUTE_KST # 캡션에 현재 설정된 시간 반영
     
     if 'YOUR_BOT_TOKEN_HERE' in TELEGRAM_BOT_TOKEN or TELEGRAM_TARGET_CHAT_ID == '-1000000000':
         logger.error("텔레그램 토큰 또는 Chat ID가 기본값입니다. 발송을 건너뜁니다.")
@@ -192,16 +231,14 @@ async def run_and_send_plot() -> bool:
         
     plot_buffer = plot_vix_sp500()
     if not plot_buffer:
-        logger.error("차트 생성 실패로 인해 전송을 건너뜁니다.")
+        logger.error("차트 생성 실패로 인해 전송을 건너뛰고 다음 목표 시간을 다시 계산합니다.")
         return False
     
-    # 임시 데이터 가져오기 (캡션을 위해)
-    # ⚠️ 이 부분도 실패할 수 있으므로, 재시도 로직을 적용한 plot_vix_sp500 대신,
-    # 데이터를 이미 가져왔다고 가정하거나, 최소한의 정보만 사용합니다.
-    # 여기서는 안전하게 짧은 기간 데이터로 최신 정보를 가져오도록 유지합니다.
+    # 캡션을 위해 최신 데이터 가져오기 (차트 생성 실패를 대비해 별도 로직 유지)
     latest_vix, latest_gspc, latest_date_utc = "N/A", "N/A", "최신 데이터 확보 실패"
     try:
-        data = yf.download(["^VIX", "^GSPC"], period="5d", progress=False)
+        # 짧은 기간으로 데이터를 가져와서 캡션에 사용 (메모리 사용)
+        data = yf.download(["^VIX", "^GSPC"], period="5d", progress=False, timeout=10)
         vix_data = data['Close']['^VIX'].dropna()
         gspc_data = data['Close']['^GSPC'].dropna()
 
@@ -211,20 +248,18 @@ async def run_and_send_plot() -> bool:
             # VIX와 GSPC의 마지막 인덱스 중 더 최근 날짜를 사용 (일반적으로 같음)
             latest_date_utc = max(vix_data.index[-1], gspc_data.index[-1]).strftime('%Y-%m-%d')
     except Exception:
-        logger.warning("캡션에 사용할 최신 VIX/S&P 500 데이터 확보 실패.")
+        logger.warning("캡션에 사용할 최신 VIX/S&P 500 데이터 확보 실패. 'N/A' 사용.")
 
 
     caption = (
-        f"**[일간 변동성 지수 모니터링]**\n"
-        f"🗓️ 기준일: {latest_date_utc} (미국 시장 마감 기준)\n"
+        f"\n🗓️ {latest_date_utc} (미국 시장 마감 기준)\n"
         f"📉 VIX (변동성): **{latest_vix:.2f}**\n"
         f"📈 S&P 500 (지수): **{latest_gspc:.0f}**\n\n"
-        f"VIX는 S&P 500 지수와 일반적으로 역의 상관관계를 가집니다.\n"
-        f"스케줄링 시간(KST): {TARGET_HOUR_KST:02d}:{TARGET_MINUTE_KST:02d}"
+        f"VIX and the S&P 500 typically move in opposite directions.\n"
     )
 
     success = await send_photo_via_http(TELEGRAM_TARGET_CHAT_ID, plot_buffer, caption)
-    plot_buffer.close()
+    plot_buffer.close() # 메모리 버퍼 닫기 (메모리 해제)
 
     if success:
         current_kst = datetime.now(KST_TZ)
@@ -339,7 +374,7 @@ async def startup_event():
     # 메인 스케줄링 루프
     asyncio.create_task(main_monitor_loop()) 
     # 슬립 방지 보조용 셀프 핑 루프
-    asyncio.create_task(self_ping_loop())   
+    asyncio.create_task(self_ping_loop())    
     logger.info("🚀 백그라운드 스케줄링 및 셀프 핑 루프가 시작되었습니다.")
 
 # ---------------------------------------------------------
