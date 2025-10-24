@@ -6,7 +6,7 @@ import io
 import logging
 import time
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Optional, Tuple
 from zoneinfo import ZoneInfo
 
 # FastAPI 관련 임포트
@@ -32,8 +32,8 @@ KST_TZ = ZoneInfo("Asia/Seoul")
 MONITOR_INTERVAL_SECONDS = 60 # 1분마다 시간 체크
 
 # ⏰ 전역 상태: 사용자가 설정할 수 있는 발송 시간 (KST)
-TARGET_HOUR_KST = int(os.environ.get('TARGET_HOUR_KST', 14))
-TARGET_MINUTE_KST = int(os.environ.get('TARGET_MINUTE_KST', 50))
+TARGET_HOUR_KST = int(os.environ.get('TARGET_HOUR_KST', 15))
+TARGET_MINUTE_KST = int(os.environ.get('TARGET_MINUTE_KST', 15))
 
 # ⚠️ 환경 변수에서 로드 (Render 환경에 필수) - 사용자가 지정한 하드코딩 값 유지
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', 'YOUR_BOT_TOKEN_HERE')
@@ -57,22 +57,19 @@ status = {
 }
 
 # =========================================================
-# --- [2] VIX Plotter 함수 (그래프 생성 로직) - Render 안정화 적용 ---
+# --- [2] VIX Plotter 함수 (그래프 생성 로직) - 최적화: 데이터 반환 추가 ---
 # =========================================================
-def plot_vix_sp500(width=6.4, height=4.8) -> Optional[io.BytesIO]:
+def plot_vix_sp500(width=6.4, height=4.8) -> Optional[Tuple[io.BytesIO, float, float, str]]:
     """
-    VIX와 S&P 500의 종가 추이를 비교하는 차트를 생성합니다.
-    Rate Limit 회피를 위한 지수적 백오프 재시도 로직이 적용되어 있습니다.
+    VIX와 S&P 500의 종가 추이를 비교하는 차트를 생성하고, 
+    생성된 차트 버퍼와 함께 최신 데이터를 반환합니다.
     """
-    # ------------------------------------------------------------------
-    # 🚫 주의: 이 함수 내부의 모든 한글 텍스트는 요청에 따라 영어로 변경되었습니다.
-    # ------------------------------------------------------------------
     logger.info("📈 Starting data download and chart generation...")
 
-    # Rate Limit 회피를 위한 지수적 백오프 재시도 로직
-    max_retry = 4 # 최대 4번 시도 (1차 + 3번 재시도)
+    max_retry = 4 
     tickers = ["^VIX", "^GSPC"]
     vix, qqq = None, None
+    latest_vix, latest_gspc, latest_date_utc = 0.0, 0.0, "N/A" # 새로 추가된 반환 변수
     
     start_date = "2025-04-01" 
     
@@ -85,7 +82,6 @@ def plot_vix_sp500(width=6.4, height=4.8) -> Optional[io.BytesIO]:
             
             # Close 데이터 추출
             vix_df = data_all['Close']['^VIX'].dropna()
-            time.sleep(2)  # ⭐️ 2초 텀 추가
             gspc_df = data_all['Close']['^GSPC'].dropna()
             
             # 공통 날짜 맞추기
@@ -97,8 +93,14 @@ def plot_vix_sp500(width=6.4, height=4.8) -> Optional[io.BytesIO]:
             if vix.empty or qqq.empty:
                 raise ValueError("Downloaded data is empty after aligning dates.")
 
-            logger.info(f"Attempt {attempt}: Data downloaded successfully (VIX={vix.iloc[-1]:.2f}, S&P500={qqq.iloc[-1]:.0f}).")
-            break # 성공적으로 다운로드 및 유효성 검사 완료
+            # ⭐️ 최신 데이터 추출 (캡션 생성을 위해) ⭐️
+            latest_vix = vix.iloc[-1].item()
+            latest_gspc = qqq.iloc[-1].item()
+            # VIX와 GSPC의 마지막 인덱스 중 더 최근 날짜를 사용 (일반적으로 같음)
+            latest_date_utc = max(vix.index[-1], qqq.index[-1]).strftime('%Y-%m-%d')
+
+            logger.info(f"Attempt {attempt}: Data downloaded successfully (VIX={latest_vix:.2f}, S&P500={latest_gspc:.0f}).")
+            break 
             
         except Exception as e:
             logger.warning(f"Data download failed (Attempt {attempt}): {e}")
@@ -128,10 +130,8 @@ def plot_vix_sp500(width=6.4, height=4.8) -> Optional[io.BytesIO]:
         ax2.set_facecolor('#2E2E2E')
         
         # 데이터 및 색상
-        common_dates = vix.index # 재정의
-        last_vix_price = vix.iloc[-1].item()
-        last_qqq_price = qqq.iloc[-1].item()
-        title_text = f"VIX ({last_vix_price:.2f}) vs S&P 500 ({last_qqq_price:.2f})"
+        common_dates = vix.index 
+        title_text = f"VIX ({latest_vix:.2f}) vs S&P 500 ({latest_gspc:.0f})"
         vix_color = '#FF6B6B' # VIX 색상 (빨간색 계열)
         qqq_color = '#6BCBFF' # S&P 500 색상 (파란색 계열)
         new_fontsize = 8 * 1.3
@@ -170,7 +170,6 @@ def plot_vix_sp500(width=6.4, height=4.8) -> Optional[io.BytesIO]:
         
         # 제목 및 여백 최소화
         fig.suptitle(title_text, color='white', fontsize=12, fontweight='bold', y=0.98) 
-        # fig.tight_layout(rect=[0.025, 0.05, 0.975, 1.0]) 
         fig.tight_layout(rect=[0.025, 0.025, 1, 1]) 
         
         # ⭐️ 메모리 버퍼에 PNG 이미지로 저장 (디스크 미사용 핵심) ⭐️
@@ -180,7 +179,9 @@ def plot_vix_sp500(width=6.4, height=4.8) -> Optional[io.BytesIO]:
         
         plt.close(fig) # **매우 중요: 메모리 누수 방지**
         logger.info("✅ Chart generation complete (saved to memory).")
-        return plot_data
+        
+        # ⭐️ 차트 버퍼와 함께 최신 데이터를 튜플로 반환 ⭐️
+        return plot_data, latest_vix, latest_gspc, latest_date_utc
 
     except Exception as e:
         logger.error(f"❌ Exception during chart generation: {e}", exc_info=True)
@@ -227,34 +228,28 @@ async def send_photo_via_http(chat_id: str, photo_bytes: io.BytesIO, caption: st
     return False
 
 async def run_and_send_plot() -> bool:
-    """차트 생성 및 전송의 전체 프로세스를 실행합니다."""
+    """차트 생성 및 전송의 전체 프로세스를 실행합니다. (최적화 적용)"""
     global status
     
     if 'YOUR_BOT_TOKEN_HERE' in TELEGRAM_BOT_TOKEN or TELEGRAM_TARGET_CHAT_ID == '-1000000000':
         logger.error("Telegram token or Chat ID is set to default. Skipping send.")
         return False
         
-    plot_buffer = plot_vix_sp500()
-    if not plot_buffer:
+    # ⭐️ plot_vix_sp500 호출 결과 변경 반영 ⭐️
+    plot_result = plot_vix_sp500()
+    
+    if not plot_result:
         logger.error("Chart generation failed. Skipping send and recalculating next target time.")
         return False
     
-    # 캡션을 위해 최신 데이터 가져오기 (차트 생성 실패를 대비해 별도 로직 유지)
-    latest_vix, latest_gspc, latest_date_utc = "N/A", "N/A", "Latest Data Acquisition Failed"
-    try:
-        # 짧은 기간으로 데이터를 가져와서 캡션에 사용 (메모리 사용)
-        data = yf.download(["^VIX", "^GSPC"], period="5d", progress=False, timeout=10)
-        vix_data = data['Close']['^VIX'].dropna()
-        gspc_data = data['Close']['^GSPC'].dropna()
-
-        if not vix_data.empty and not gspc_data.empty:
-            latest_vix = vix_data.iloc[-1].item()
-            latest_gspc = gspc_data.iloc[-1].item()
-            # VIX와 GSPC의 마지막 인덱스 중 더 최근 날짜를 사용 (일반적으로 같음)
-            latest_date_utc = max(vix_data.index[-1], gspc_data.index[-1]).strftime('%Y-%m-%d')
-    except Exception:
-        logger.warning("Failed to acquire latest VIX/S&P 500 data for caption. Using 'N/A'.")
-
+    plot_buffer, latest_vix, latest_gspc, latest_date_utc = plot_result
+    
+    # -------------------------------------------------------------
+    # 🚫 제거된 코드: 중복 데이터 다운로드 로직을 삭제했습니다.
+    # -------------------------------------------------------------
+    # 최신 데이터는 plot_vix_sp500 함수에서 이미 가져와 반환했으므로 
+    # 다시 다운로드할 필요가 없습니다.
+    # -------------------------------------------------------------
 
     caption = (
         # 한글 -> 영어 변경
