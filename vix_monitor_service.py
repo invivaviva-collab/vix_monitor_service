@@ -23,45 +23,66 @@ import matplotlib
 import numpy as np
 import pandas as pd
 
-def get_usdt_and_exchange_rate(): 
-    테더원 = 0
-    달러원 = 0
-    달러테더괴리율 = 0
 
-    # 달러-원 환율 (Daum 금융)
+def get_usdt_and_exchange_rate() -> tuple[float, float, float]:
+    """USDT(업비트) 가격, 원-달러 환율(다음), 괴리율(%) 반환"""
+    테더원 = 0.0
+    달러원 = 0.0
+    달러테더괴리율 = 0.0
+
+    # === 달러-원 환율 (Daum 금융) ===
     try:
         url = "https://finance.daum.net/api/exchanges/FRX.KRWUSD"
         headers = {
-            # ... (User-Agent, Referer 생략) ...
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            ),
+            "Accept": "application/json, text/plain, */*",
+            "Referer": "https://finance.daum.net/",
         }
-        resp = requests.get(url, headers=headers, timeout=5)
-        resp.raise_for_status()
-        data = resp.json()
-        base_price = data.get("basePrice")
-        if base_price is not None:
-            달러원 = float(base_price)
-    except:
-        달러원 = 0
 
-    # 업비트 USDT 가격
+        s = requests.Session()
+        s.headers.update(headers)
+        # 메인 페이지 방문해 세션 쿠키 확보
+        try:
+            s.get("https://finance.daum.net/", timeout=5)
+        except:
+            pass
+
+        for _ in range(2):  # 403 등 발생 시 2회 재시도
+            try:
+                resp = s.get(url, timeout=5)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    base_price = data.get("basePrice")
+                    if base_price is not None:
+                        달러원 = float(base_price)
+                    break
+                elif resp.status_code == 403:
+                    time.sleep(1)
+            except:
+                time.sleep(0.5)
+    except:
+        달러원 = 0.0
+
+    # === 업비트 USDT 가격 ===
     try:
-        url_upbit_USDT = "https://api.upbit.com/v1/ticker?markets=KRW-USDT"
-        resp = requests.get(url_upbit_USDT, timeout=5).json()
-        테더원 = float(resp[0]['trade_price'])
+        resp = requests.get("https://api.upbit.com/v1/ticker?markets=KRW-USDT", timeout=5).json()
+        테더원 = float(resp[0]["trade_price"])
         time.sleep(1)
     except:
-        테더원 = 0 
+        테더원 = 0.0
 
-    # 달러-테더 괴리율 계산
+    # === 달러-테더 괴리율 계산 ===
     try:
-        if 달러원 != 0 and 테더원 != 0:
+        if 달러원 and 테더원:
             달러테더괴리율 = round((테더원 / 달러원 - 1) * 100, 2)
-        else:
-            달러테더괴리율 = 0
     except ZeroDivisionError:
-        달러테더괴리율 = 0
+        달러테더괴리율 = 0.0
 
     return 테더원, 달러원, 달러테더괴리율
+
 
 
 class GoldKimpAnalyzer:
@@ -147,6 +168,7 @@ class GoldKimpAnalyzer:
         logging.info("지표 계산 및 반환 성공.")
         return metrics
 Goldresult = GoldKimpAnalyzer().get_core_metrics()
+
 
 
 class FearGreedFetcher:
