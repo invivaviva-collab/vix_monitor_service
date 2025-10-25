@@ -23,90 +23,6 @@ import matplotlib
 import numpy as np
 import pandas as pd
 
-class FearGreedFetcher:
-    """
-    CNN + Upbit 공포/탐욕 지수 및 P/C 비율 통합 클래스
-    개별 값 단위로 오류 발생 시 0으로 처리
-    """
-    CNN_BASE_URL = "https://production.dataviz.cnn.io/index/fearandgreed/graphdata/"
-    UPBIT_FG_API = "https://datalab-api.upbit.com/api/v1/indicator/overview"
-    HEADERS = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-    }
-
-    ERROR_VALUE = 0  # 숫자 오류 시 0 반환
-
-    def __init__(self):
-        self.공탐레이팅: float = self.ERROR_VALUE
-        self.공탐: float = self.ERROR_VALUE
-        self.풋엔콜레이팅: float = self.ERROR_VALUE
-        self.풋엔콜값: float = self.ERROR_VALUE
-        self.코인레이팅: float = self.ERROR_VALUE
-        self.코인: float = self.ERROR_VALUE
-
-    def fetch_all(self) -> tuple[float, float, float, float, float, float]:
-        """CNN + Upbit 데이터 모두 조회, 개별 오류 시 0 반환"""
-        self._fetch_cnn_data()
-        self._fetch_upbit_data()
-        return (self.공탐레이팅, self.공탐, self.풋엔콜레이팅, self.풋엔콜값, self.코인레이팅, self.코인)
-
-    def _fetch_cnn_data(self):
-        today = datetime.now().date()
-        dates_to_try = [today.strftime("%Y-%m-%d"), (today - timedelta(days=1)).strftime("%Y-%m-%d")]
-
-        data = None
-        for date_str in dates_to_try:
-            try:
-                r = requests.get(self.CNN_BASE_URL + date_str, headers=self.HEADERS, timeout=10)
-                r.raise_for_status()
-                data = r.json()
-                break
-            except:
-                continue
-
-        # CNN 데이터가 아예 없으면 모두 0
-        if not data:
-            self.공탐레이팅 = self.공탐 = self.풋엔콜레이팅 = self.풋엔콜값 = 0
-            return
-
-        # Fear & Greed
-        fg_data = data.get("fear_and_greed", {})
-        self.공탐레이팅 = fg_data.get("rating", 0) or 0
-        self.공탐 = fg_data.get("score", 0) or 0
-
-        # Put/Call
-        put_call_data = data.get("put_call_options", {})
-        self.풋엔콜레이팅 = put_call_data.get("rating", 0) or 0
-        pc_list = put_call_data.get("data", [])
-        self.풋엔콜값 = pc_list[-1].get("y", 0) if pc_list else 0
-
-    def _fetch_upbit_data(self):
-        try:
-            r = requests.get(self.UPBIT_FG_API, headers=self.HEADERS, timeout=10)
-            r.raise_for_status()
-            data = r.json()
-        except:
-            self.코인레이팅 = self.코인 = 0
-            return
-
-        coin_fg = None
-        for indicator in data.get("data", {}).get("indicators", []):
-            if indicator.get("info", {}).get("category") == "fear":
-                coin_fg = indicator
-                break
-
-        if not coin_fg:
-            self.코인레이팅 = self.코인 = 0
-            return
-
-        self.코인레이팅 = coin_fg.get("chart", {}).get("gauge", {}).get("name", 0) or 0
-        self.코인 = coin_fg.get("price", {}).get("tradePrice", 0) or 0
-fetcher = FearGreedFetcher()
-
-
-
-
-
 def get_usdt_and_exchange_rate(): 
     테더원 = 0
     달러원 = 0
@@ -148,62 +64,196 @@ def get_usdt_and_exchange_rate():
     return 테더원, 달러원, 달러테더괴리율
 
 
-
-
-
-
 class GoldKimpAnalyzer:
     API_URL = "https://goldkimp.com/wp-json/ck/v1/kpri"
-    OUNCE_TO_GRAM = 31.1034768
+    OUNCE_TO_GRAM = 31.1034768 # 상수: 온스를 그램으로 변환
 
     def __init__(self, api_url: str = API_URL):
         self.api_url = api_url
 
     def _fetch_data(self):
+        """API에서 데이터를 가져오고 JSON 형식으로 반환합니다."""
         try:
+            logging.info("골드 김프 API 데이터 요청 중...")
             resp = requests.get(self.api_url, timeout=10)
             resp.raise_for_status()
             data = resp.json()
             if not data.get("rows"):
+                logging.warning("API 응답에 'rows' 데이터가 비어있습니다.")
                 return None
+            logging.info("데이터 가져오기 성공.")
             return data
-        except Exception:
+        except requests.exceptions.RequestException as e:
+            logging.error(f"API 요청 오류 발생: {e}")
+            return None
+        except Exception as e:
+            logging.error(f"데이터 파싱 중 예상치 못한 오류 발생: {e}")
             return None
 
     def _calculate_metrics(self, data):
+        """가져온 데이터를 기반으로 KRX 가격, 국제 가격, 김프를 계산합니다."""
+        if data is None:
+            return None
+            
         try:
             df = pd.DataFrame(data.get("rows", []))
-            df['time'] = pd.to_datetime(df['time'], format='%y/%m/%d %H:%M')
+            
+            # 1. 데이터 클리닝 및 인덱스 설정
+            df['time'] = pd.to_datetime(df['time'], format='%y/%m/%d %H:%M', errors='coerce')
             df.set_index('time', inplace=True)
             df.sort_index(inplace=True)
 
+            # 2. 숫자형 변환 및 결측치 제거
             df['xauusd_oz'] = pd.to_numeric(df['xauusd_oz'], errors='coerce')
             df['usdkrw'] = pd.to_numeric(df['usdkrw'], errors='coerce')
             df['krxkrw_g'] = pd.to_numeric(df['krxkrw_g'], errors='coerce')
             df.dropna(subset=['xauusd_oz', 'usdkrw', 'krxkrw_g'], inplace=True)
+            
             if df.empty:
+                logging.warning("데이터 클리닝 후 유효한 행이 남아있지 않습니다.")
                 return None
 
-            df['xau_krw_g'] = (df['xauusd_oz'] * df['usdkrw']) / self.OUNCE_TO_GRAM
+            # 3. 계산 로직
+            # 국제 금 가격 (원/그램) = (온스당 달러 * 달러/원) / 온스당 그램 수
+            # 🚨 개선: self 대신 GoldKimpAnalyzer 클래스 이름으로 상수 접근
+            df['xau_krw_g'] = (df['xauusd_oz'] * df['usdkrw']) / GoldKimpAnalyzer.OUNCE_TO_GRAM
+            
+            # 프리미엄 (김프) 계산
             df['premium_rate'] = ((df['krxkrw_g'] - df['xau_krw_g']) / df['xau_krw_g']) * 100
 
             latest = df.iloc[-1]
+            
+            # 4. 반환
+            # 🚨 개선: 불필요한 float() 캐스팅 제거
             return (
-                float(latest['krxkrw_g']),          
-                float(latest['xau_krw_g']),         
-                round(float(latest['premium_rate']), 4)  
+                latest['krxkrw_g'],          # KRX 금 가격 (원/그램)
+                latest['xau_krw_g'],        # 국제 금 가격 (원/그램)
+                round(latest['premium_rate'], 4)  # 프리미엄 (김프, 소수점 4자리)
             )
-        except Exception:
+        except Exception as e:
+            logging.error(f"_calculate_metrics에서 처리 중 오류 발생: {e}")
             return None
 
     # 🔹 메인 루프용 안전한 호출 메서드
     def get_core_metrics(self):
+        """주요 지표를 가져와서 반환합니다. 오류 시 (0.0, 0.0, 0.0)을 반환합니다."""
         data = self._fetch_data()
         metrics = self._calculate_metrics(data) if data else None
+        
         if metrics is None:
+            logging.warning("지표 계산 실패. 기본값 (0.0, 0.0, 0.0) 반환.")
             return 0.0, 0.0, 0.0  # 오류 발생 시 0으로 반환
+        
+        logging.info("지표 계산 및 반환 성공.")
         return metrics
 Goldresult = GoldKimpAnalyzer().get_core_metrics()
+
+
+class FearGreedFetcher:
+    """
+    CNN + Upbit 공포/탐욕 지수 및 P/C 비율 통합 클래스
+    데이터를 인스턴스 변수에 저장하지 않고, 직접 튜플로 반환합니다.
+    """
+    CNN_BASE_URL = "https://production.dataviz.cnn.io/index/fearandgreed/graphdata/"
+    UPBIT_FG_API = "https://datalab-api.upbit.com/api/v1/indicator/overview"
+    HEADERS = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    }
+
+    ERROR_RATING_STR = "" # 코인 레이팅은 문자열이므로 오류 시 빈 문자열 반환
+    ERROR_VALUE = 0.0      # 숫자 오류 시 0.0 반환
+
+    # 🚨 __init__에서 불필요한 인스턴스 변수 초기화 제거 (상태 미저장)
+    def __init__(self):
+        pass
+
+    def fetch_all(self) -> tuple[float, float, float, float, str, float]:
+        """CNN + Upbit 데이터 모두 조회, 개별 오류 시 0 또는 빈 문자열 반환"""
+        
+        # 🚨 _fetch_cnn_data가 직접 결과를 튜플로 반환하도록 수정
+        공탐레이팅, 공탐, 풋엔콜레이팅, 풋엔콜값 = self._fetch_cnn_data()
+        
+        # 🚨 _fetch_upbit_data가 직접 결과를 튜플로 반환하도록 수정
+        코인레이팅, 코인 = self._fetch_upbit_data()
+        
+        return (공탐레이팅, 공탐, 풋엔콜레이팅, 풋엔콜값, 코인레이팅, 코인)
+
+
+    def _fetch_cnn_data(self) -> tuple[float, float, float, float]:
+        """CNN Fear & Greed 지수 및 P/C 비율을 가져옵니다."""
+        today = datetime.now().date()
+        dates_to_try = [today.strftime("%Y-%m-%d"), (today - timedelta(days=1)).strftime("%Y-%m-%d")]
+
+        data = None
+        for date_str in dates_to_try:
+            try:
+                r = requests.get(self.CNN_BASE_URL + date_str, headers=self.HEADERS, timeout=10)
+                r.raise_for_status()
+                data = r.json()
+                logging.info(f"CNN 데이터 {date_str}에서 성공적으로 가져옴.")
+                break
+            except requests.exceptions.RequestException as e:
+                 logging.warning(f"CNN 요청 실패 ({date_str}): {e}")
+                 continue
+            except Exception as e:
+                 logging.error(f"CNN 데이터 처리 오류: {e}")
+                 continue
+
+        # CNN 데이터가 아예 없으면 모두 0.0 반환
+        if not data:
+            return self.ERROR_VALUE, self.ERROR_VALUE, self.ERROR_VALUE, self.ERROR_VALUE
+
+        # Fear & Greed
+        fg_data = data.get("fear_and_greed", {})
+        # 🚨 개선: or 0 제거 (get()의 기본값 0.0으로 충분)
+        공탐레이팅 = fg_data.get("rating", self.ERROR_VALUE) 
+        공탐 = fg_data.get("score", self.ERROR_VALUE) 
+
+        # Put/Call
+        put_call_data = data.get("put_call_options", {})
+        # 🚨 개선: or 0 제거
+        풋엔콜레이팅 = put_call_data.get("rating", self.ERROR_VALUE) 
+        pc_list = put_call_data.get("data", [])
+        # 🚨 개선: 리스트가 비어있는지 확인하고, or 0 제거
+        풋엔콜값 = pc_list[-1].get("y", self.ERROR_VALUE) if pc_list else self.ERROR_VALUE
+        
+        return 공탐레이팅, 공탐, 풋엔콜레이팅, 풋엔콜값
+
+
+    def _fetch_upbit_data(self) -> tuple[str, float]:
+        """업비트 코인 공포/탐욕 지수를 가져옵니다."""
+        try:
+            r = requests.get(self.UPBIT_FG_API, headers=self.HEADERS, timeout=10)
+            r.raise_for_status()
+            data = r.json()
+            logging.info("Upbit 데이터 성공적으로 가져옴.")
+        except requests.exceptions.RequestException as e:
+            logging.error(f"Upbit 요청 오류 발생: {e}")
+            return self.ERROR_RATING_STR, self.ERROR_VALUE
+        except Exception as e:
+            logging.error(f"Upbit 데이터 처리 오류: {e}")
+            return self.ERROR_RATING_STR, self.ERROR_VALUE
+
+        coin_fg = None
+        for indicator in data.get("data", {}).get("indicators", []):
+            if indicator.get("info", {}).get("category") == "fear":
+                coin_fg = indicator
+                break
+
+        if not coin_fg:
+            logging.warning("Upbit 응답에서 코인 공포/탐욕 지수를 찾을 수 없습니다.")
+            return self.ERROR_RATING_STR, self.ERROR_VALUE
+
+        # 코인 레이팅은 문자열 (예: "공포", "탐욕")이므로 float 대신 str로 반환하도록 수정
+        코인레이팅 = coin_fg.get("chart", {}).get("gauge", {}).get("name", self.ERROR_RATING_STR)
+        코인 = coin_fg.get("price", {}).get("tradePrice", self.ERROR_VALUE)
+        
+        # 🚨 주의: 현재 fetch_all의 타입 힌트 (float, float)에 맞추기 위해 코인레이팅을 float 대신 str로 반환하도록 
+        #           fetch_all의 타입 힌트를 수정했습니다. (튜플: float, float, float, float, str, float)
+        
+        return 코인레이팅, 코인
+fetcher = FearGreedFetcher()
+
 
 
 
@@ -469,7 +519,7 @@ async def run_and_send_plot() -> bool:
     
     # Latest data is already fetched inside plot_vix_sp500
     공탐레이팅, 공탐, 풋엔콜레이팅, 풋엔콜값, 코인레이팅, 코인 = fetcher.fetch_all()
-    테더원, 달러원, 달러테더괴리율 = get_usdt_and_exchange_rate(refresh_count=0)
+    테더원, 달러원, 달러테더괴리율 = get_usdt_and_exchange_rate()
     한국시세, 국제시세, 괴리율 = Goldresult
 
     caption = (
