@@ -32,8 +32,8 @@ KST_TZ = ZoneInfo("Asia/Seoul")
 MONITOR_INTERVAL_SECONDS = 60 # Check time every 1 minute
 
 # ⏰ Global State: User-configurable send time (KST)
-TARGET_HOUR_KST = int(os.environ.get('TARGET_HOUR_KST', 7))
-TARGET_MINUTE_KST = int(os.environ.get('TARGET_MINUTE_KST', 19))
+TARGET_HOUR_KST = int(os.environ.get('TARGET_HOUR_KST', 6))
+TARGET_MINUTE_KST = int(os.environ.get('TARGET_MINUTE_KST', 0))
 
 # ⚠️ Load from environment variables (essential for Render environment)
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', 'YOUR_BOT_TOKEN_HERE')
@@ -113,7 +113,7 @@ def _sync_fetch_and_plot_data(width=6.4, height=4.8) -> Optional[Tuple[io.BytesI
         ax2.set_facecolor('#2E2E2E')
         
         # Data and colors
-        title_text = f"VIX ({latest_vix:.2f}) vs S&P 500 ({latest_gspc:.0f})"
+        title_text = f"S&P 500 ({latest_gspc:.2f}) vs VIX ({latest_vix:.2f})"
         vix_color = '#FF6B6B' # VIX color (Red tone)
         qqq_color = '#6BCBFF' # S&P 500 color (Blue tone)
         new_fontsize = 8 * 1.3
@@ -285,9 +285,9 @@ async def run_and_send_plot() -> bool:
 
     caption = (
         f"\n🗓️ {latest_date_utc} (US Market Close)\n"
-        f"📉 VIX (Volatility): **{latest_vix:.2f}**\n"
-        f"📈 S&P 500 (Index): **{latest_gspc:.0f}**\n\n"
-        f"VIX and S&P 500 Index typically move in opposite directions.\n"
+        f"📉 S&P 500 (Index): **{latest_gspc:.2f}**\n"
+        f"📈 VIX (Volatility): **{latest_vix:.2f}**"
+        # f"VIX and S&P 500 Index typically move in opposite directions.\n"
     )
 
     success = await send_photo_via_http(TELEGRAM_TARGET_CHAT_ID, plot_buffer, caption)
