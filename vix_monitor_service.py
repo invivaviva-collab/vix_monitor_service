@@ -106,56 +106,48 @@ fetcher = FearGreedFetcher()
 
 
 
-def get_usdt_and_exchange_rate(refresh_count=0):
-    # 🚨 수정: 테더원 초기값을 0으로 설정하여 실패 시 0이 반환되도록 함
+
+def get_usdt_and_exchange_rate(): 
     테더원 = 0
     달러원 = 0
     달러테더괴리율 = 0
 
-    # 환율 갱신 (refresh_count 기준)
-    if refresh_count % 20 == 0 or 달러원 == 0:
-        # 달러-원 환율 (Daum 금융)
-        try:
-            url = "https://finance.daum.net/api/exchanges/FRX.KRWUSD"
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36",
-                "Referer": "https://finance.daum.net/exchanges"
-            }
-            resp = requests.get(url, headers=headers, timeout=5)
-            resp.raise_for_status()
-            data = resp.json()
-            base_price = data.get("basePrice")
-            if base_price is not None:
-                달러원 = float(base_price)
-        except Exception as e:
-            # logging.error(f"Daum 환율 조회 오류: {e}")
-            달러원 = 0
+    # 달러-원 환율 (Daum 금융)
+    try:
+        url = "https://finance.daum.net/api/exchanges/FRX.KRWUSD"
+        headers = {
+            # ... (User-Agent, Referer 생략) ...
+        }
+        resp = requests.get(url, headers=headers, timeout=5)
+        resp.raise_for_status()
+        data = resp.json()
+        base_price = data.get("basePrice")
+        if base_price is not None:
+            달러원 = float(base_price)
+    except:
+        달러원 = 0
 
-        # 업비트 USDT 가격
-        try:
-            url_upbit_USDT = "https://api.upbit.com/v1/ticker?markets=KRW-USDT"
-            resp = requests.get(url_upbit_USDT, timeout=5).json()
-            테더원 = float(resp[0]['trade_price'])
-            time.sleep(1)
-        except Exception as e:
-            # logging.error(f"업비트 USDT 조회 오류: {e}")
-            # 🚨 수정: 오류 발생 시 테더원을 0으로 유지 (초기값 사용)
-            테더원 = 0 
-
+    # 업비트 USDT 가격
+    try:
+        url_upbit_USDT = "https://api.upbit.com/v1/ticker?markets=KRW-USDT"
+        resp = requests.get(url_upbit_USDT, timeout=5).json()
+        테더원 = float(resp[0]['trade_price'])
+        time.sleep(1)
+    except:
+        테더원 = 0 
 
     # 달러-테더 괴리율 계산
     try:
-        # 🚨 수정: 달러원이 0인 경우도 ZeroDivisionError가 발생하므로, 먼저 확인
         if 달러원 != 0 and 테더원 != 0:
             달러테더괴리율 = round((테더원 / 달러원 - 1) * 100, 2)
         else:
-            # 달러원 또는 테더원 중 하나라도 0이면 괴리율도 0으로 설정 (오류 인지)
             달러테더괴리율 = 0
     except ZeroDivisionError:
-        # 이 블록은 달러원 != 0 인데도 테더원 == 0 일 때만 실행됨. (방어 코드)
         달러테더괴리율 = 0
-    
+
     return 테더원, 달러원, 달러테더괴리율
+
+
 
 
 
