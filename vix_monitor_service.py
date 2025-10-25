@@ -550,7 +550,7 @@ async def run_and_send_plot() -> bool:
             f"\n🗓️ {latest_date_utc} (US Market Close)\n"
             f"📈 VIX (Volatility): **{latest_vix:.2f}**\n"   
             f"📉 S&P 500 (Index): **{latest_gspc:.2f}**\n"
-            f"🙏 S&P 500 (Fear / Greed): {공탐레이팅}\n"                     
+            f"🙏 S&P 500 (Fear/Greed): {공탐레이팅}\n"                     
             
             # f"공탐: {공탐}\n"
             # f"💹 풋/콜: {풋엔콜레이팅}\n"
@@ -558,9 +558,9 @@ async def run_and_send_plot() -> bool:
             f"🪙 업비트 (공포/탐욕): {코인레이팅}\n\n"
             # f"코인: {코인}\n"
             
-            f"💲 달러-원: {달러원:,.0f} 원\n"
-            f"💵 테더-원: {테더원:,.0f} 원\n"            
-            f"🏦 USDT/USD 괴리율: {달러테더괴리율:.2f} %\n"
+            f"💵 달러-원: {달러원:,.0f} 원\n"
+            f"💸 테더-원: {테더원:,.0f} 원\n"            
+            f"🏦 USDT/USD 괴리율: {달러테더괴리율:.2f} %\n\n"
             # f"🏦 달러 인덱스 대비 원화 평가: {달러대비원화}\n\n"
             
             f"🇰🇷 한국 금 시세: {한국시세:,.0f} 원\n"
