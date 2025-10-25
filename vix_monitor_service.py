@@ -556,13 +556,13 @@ async def run_and_send_plot() -> bool:
             # f"🪙 업비트 (공포/탐욕): {코인레이팅}\n\n"
             # f"코인: {코인}\n"
             
-            f"💵 USD/KRW: {달러원:,.0f} 원\n"
-            f"💸 USDT/KRW: {테더원:,.0f} 원\n"            
+            f"💵 USD/KRW: {달러원:,.0f}\n"
+            f"💸 USDT/KRW: {테더원:,.0f}\n"            
             f"🏦 USDT–USD Spread: {달러테더괴리율:.2f} %\n\n"
             # f"🏦 달러 인덱스 대비 원화 평가: {달러대비원화}\n\n"
             
-            f"🇰🇷 Korea Gold Price: {한국시세:,.0f} 원\n"
-            f"🇬🇧 Global Gold Price: {국제시세:,.0f} 원\n"
+            f"🇰🇷 Korea Gold Price: {한국시세:,.0f} KRW/g\n"
+            f"🇬🇧 Global Gold Price: {국제시세:,.0f} KRW/g\n"
             f"⚖️ KRX Gold Market Premium: {괴리율:.2f} %"
         )
 
