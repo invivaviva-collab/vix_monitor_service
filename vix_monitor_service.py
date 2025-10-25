@@ -546,8 +546,8 @@ async def run_and_send_plot() -> bool:
 
     caption = (
             f"\n🗓️ {latest_date_utc} (US Market Close)\n"
-            f"📈 VIX (Volatility): **{latest_vix:.2f}**\n"   
-            f"📉 S&P 500 (Index): **{latest_gspc:.2f}**\n"
+            f"📈 VIX (Volatility): {latest_vix:.2f}\n"   
+            f"📉 S&P 500 (Index): {latest_gspc:.2f}\n"
             f"🙏 S&P 500 (Fear/Greed): {공탐레이팅}\n\n"                     
             
             # f"공탐: {공탐}\n"
