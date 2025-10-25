@@ -5,8 +5,9 @@ import aiohttp
 import io
 import logging
 import time
+import requests
 from datetime import datetime, timedelta
-from typing import Optional, Tuple
+from typing import Optional, Dict, Any, Tuple
 from zoneinfo import ZoneInfo
 
 # FastAPI imports
@@ -20,6 +21,265 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import matplotlib
 import numpy as np
+import pandas as pd
+
+class FearGreedFetcher:
+    """
+    CNN + Upbit 공포/탐욕 지수 및 P/C 비율 통합 클래스
+    개별 값 단위로 오류 발생 시 0으로 처리
+    """
+    CNN_BASE_URL = "https://production.dataviz.cnn.io/index/fearandgreed/graphdata/"
+    UPBIT_FG_API = "https://datalab-api.upbit.com/api/v1/indicator/overview"
+    HEADERS = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    }
+
+    ERROR_VALUE = 0  # 숫자 오류 시 0 반환
+
+    def __init__(self):
+        self.공탐레이팅: float = self.ERROR_VALUE
+        self.공탐: float = self.ERROR_VALUE
+        self.풋엔콜레이팅: float = self.ERROR_VALUE
+        self.풋엔콜값: float = self.ERROR_VALUE
+        self.코인레이팅: float = self.ERROR_VALUE
+        self.코인: float = self.ERROR_VALUE
+
+    def fetch_all(self) -> tuple[float, float, float, float, float, float]:
+        """CNN + Upbit 데이터 모두 조회, 개별 오류 시 0 반환"""
+        self._fetch_cnn_data()
+        self._fetch_upbit_data()
+        return (self.공탐레이팅, self.공탐, self.풋엔콜레이팅, self.풋엔콜값, self.코인레이팅, self.코인)
+
+    def _fetch_cnn_data(self):
+        today = datetime.now().date()
+        dates_to_try = [today.strftime("%Y-%m-%d"), (today - timedelta(days=1)).strftime("%Y-%m-%d")]
+
+        data = None
+        for date_str in dates_to_try:
+            try:
+                r = requests.get(self.CNN_BASE_URL + date_str, headers=self.HEADERS, timeout=10)
+                r.raise_for_status()
+                data = r.json()
+                break
+            except:
+                continue
+
+        # CNN 데이터가 아예 없으면 모두 0
+        if not data:
+            self.공탐레이팅 = self.공탐 = self.풋엔콜레이팅 = self.풋엔콜값 = 0
+            return
+
+        # Fear & Greed
+        fg_data = data.get("fear_and_greed", {})
+        self.공탐레이팅 = fg_data.get("rating", 0) or 0
+        self.공탐 = fg_data.get("score", 0) or 0
+
+        # Put/Call
+        put_call_data = data.get("put_call_options", {})
+        self.풋엔콜레이팅 = put_call_data.get("rating", 0) or 0
+        pc_list = put_call_data.get("data", [])
+        self.풋엔콜값 = pc_list[-1].get("y", 0) if pc_list else 0
+
+    def _fetch_upbit_data(self):
+        try:
+            r = requests.get(self.UPBIT_FG_API, headers=self.HEADERS, timeout=10)
+            r.raise_for_status()
+            data = r.json()
+        except:
+            self.코인레이팅 = self.코인 = 0
+            return
+
+        coin_fg = None
+        for indicator in data.get("data", {}).get("indicators", []):
+            if indicator.get("info", {}).get("category") == "fear":
+                coin_fg = indicator
+                break
+
+        if not coin_fg:
+            self.코인레이팅 = self.코인 = 0
+            return
+
+        self.코인레이팅 = coin_fg.get("chart", {}).get("gauge", {}).get("name", 0) or 0
+        self.코인 = coin_fg.get("price", {}).get("tradePrice", 0) or 0
+fetcher = FearGreedFetcher()
+
+
+class TetherMonitor:
+    def __init__(self):
+        self.GOOD_THRESHOLD_KIMF = 1.5
+        self.NORMAL_THRESHOLD_KIMF = 3.0
+        self.dxy_hist = pd.Series(dtype=float)
+        self.usdkrw = None
+        self.usdtkrw = None
+
+    def fetch_data(self):
+        errors = []
+
+        # USD/KRW 환율 (다음 금융)
+        try:
+            url = "https://finance.daum.net/api/exchanges/FRX.KRWUSD"
+            headers = {"User-Agent": "Mozilla/5.0", "Referer": "https://finance.daum.net/exchanges"}
+            resp = requests.get(url, headers=headers, timeout=5).json()
+            self.usdkrw = float(resp.get('basePrice', 0))
+            if self.usdkrw == 0:
+                errors.append("USD/KRW 파싱 오류")
+        except:
+            self.usdkrw = None
+            errors.append("USD/KRW 파싱 오류")
+
+        # USDT/KRW (업비트)
+        try:
+            url_upbit_USDT = "https://api.upbit.com/v1/ticker?markets=KRW-USDT"
+            resp = requests.get(url_upbit_USDT, timeout=5).json()
+            self.usdtkrw = float(resp[0]['trade_price'])
+            if self.usdtkrw == 0:
+                errors.append("테더 파싱 오류")
+        except:
+            self.usdtkrw = None
+            errors.append("테더 파싱 오류")
+
+        # DXY (달러 인덱스) – 재시도 3회
+        attempt = 0
+        max_attempts = 3
+        self.dxy_hist = pd.Series(dtype=float)
+
+        while attempt < max_attempts:
+            try:
+                ticker = yf.Ticker("DX-Y.NYB")
+                self.dxy_hist = ticker.history(period="7d", interval="1h")['Close']
+                if not self.dxy_hist.empty:
+                    break  # 성공하면 루프 종료
+                else:
+                    errors.append("DXY 파싱 오류 (빈 데이터)")
+            except Exception as e:
+                errors.append(f"DXY 파싱 오류: {e}")
+
+            attempt += 1
+            if attempt < max_attempts:
+                time.sleep(3)  # 3초 인터벌 후 재시도
+
+        if self.dxy_hist.empty:
+            errors.append("DXY 데이터 가져오기 실패 (3회)")
+
+        return errors
+
+    def evaluate(self):
+        errors = self.fetch_data()
+        if errors:
+            return "데이터 오류"
+
+        kimchi_premium = ((self.usdtkrw / self.usdkrw) - 1) * 100
+
+        usdkrw_series = pd.Series([self.usdkrw] * len(self.dxy_hist), index=self.dxy_hist.index)
+        dxy_norm = (self.dxy_hist - self.dxy_hist.min()) / (self.dxy_hist.max() - self.dxy_hist.min())
+        usdkrw_norm = (usdkrw_series - usdkrw_series.min()) / (usdkrw_series.max() - usdkrw_series.min())
+
+        relative_diff = usdkrw_norm.iloc[-1] - dxy_norm.iloc[-1]
+
+        if relative_diff < 0:
+            return "원화 강세"
+        else:
+            return "원화 약세"
+Tmonitor = TetherMonitor()
+
+
+
+def get_usdt_and_exchange_rate(refresh_count=0):
+    테더원 = 1
+    달러원 = 0
+    달러테더괴리율 = 0
+
+    # 환율 갱신 (refresh_count 기준)
+    if refresh_count % 20 == 0 or 달러원 == 0:
+        # 달러-원 환율 (Daum 금융)
+        try:
+            url = "https://finance.daum.net/api/exchanges/FRX.KRWUSD"
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36",
+                "Referer": "https://finance.daum.net/exchanges"
+            }
+            resp = requests.get(url, headers=headers, timeout=5)
+            resp.raise_for_status()
+            data = resp.json()
+            base_price = data.get("basePrice")
+            if base_price is not None:
+                달러원 = float(base_price)
+        except:
+            달러원 = 0
+
+        # 업비트 USDT 가격
+        try:
+            url_upbit_USDT = "https://api.upbit.com/v1/ticker?markets=KRW-USDT"
+            resp = requests.get(url_upbit_USDT, timeout=5).json()
+            테더원 = float(resp[0]['trade_price'])
+            time.sleep(1)
+        except:
+            테더원 = 1
+
+    # 달러-테더 괴리율 계산
+    try:
+        달러테더괴리율 = round((테더원 / 달러원 - 1) * 100, 2)
+    except ZeroDivisionError:
+        달러테더괴리율 = 0
+
+    return 테더원, 달러원, 달러테더괴리율
+
+
+
+class GoldKimpAnalyzer:
+    API_URL = "https://goldkimp.com/wp-json/ck/v1/kpri"
+    OUNCE_TO_GRAM = 31.1034768
+
+    def __init__(self, api_url: str = API_URL):
+        self.api_url = api_url
+
+    def _fetch_data(self):
+        try:
+            resp = requests.get(self.api_url, timeout=10)
+            resp.raise_for_status()
+            data = resp.json()
+            if not data.get("rows"):
+                return None
+            return data
+        except Exception:
+            return None
+
+    def _calculate_metrics(self, data):
+        try:
+            df = pd.DataFrame(data.get("rows", []))
+            df['time'] = pd.to_datetime(df['time'], format='%y/%m/%d %H:%M')
+            df.set_index('time', inplace=True)
+            df.sort_index(inplace=True)
+
+            df['xauusd_oz'] = pd.to_numeric(df['xauusd_oz'], errors='coerce')
+            df['usdkrw'] = pd.to_numeric(df['usdkrw'], errors='coerce')
+            df['krxkrw_g'] = pd.to_numeric(df['krxkrw_g'], errors='coerce')
+            df.dropna(subset=['xauusd_oz', 'usdkrw', 'krxkrw_g'], inplace=True)
+            if df.empty:
+                return None
+
+            df['xau_krw_g'] = (df['xauusd_oz'] * df['usdkrw']) / self.OUNCE_TO_GRAM
+            df['premium_rate'] = ((df['krxkrw_g'] - df['xau_krw_g']) / df['xau_krw_g']) * 100
+
+            latest = df.iloc[-1]
+            return (
+                float(latest['krxkrw_g']),          
+                float(latest['xau_krw_g']),         
+                round(float(latest['premium_rate']), 4)  
+            )
+        except Exception:
+            return None
+
+    # 🔹 메인 루프용 안전한 호출 메서드
+    def get_core_metrics(self):
+        data = self._fetch_data()
+        metrics = self._calculate_metrics(data) if data else None
+        if metrics is None:
+            return 0.0, 0.0, 0.0  # 오류 발생 시 0으로 반환
+        return metrics
+Goldresult = GoldKimpAnalyzer().get_core_metrics()
+
+
 
 # Set Matplotlib backend (required for headless server environment)
 matplotlib.use('Agg')
@@ -282,13 +542,31 @@ async def run_and_send_plot() -> bool:
     plot_buffer, latest_vix, latest_gspc, latest_date_utc = plot_result
     
     # Latest data is already fetched inside plot_vix_sp500
+    공탐레이팅, 공탐, 풋엔콜레이팅, 풋엔콜값, 코인레이팅, 코인 = fetcher.fetch_all()
+    테더원, 달러원, 달러테더괴리율 = get_usdt_and_exchange_rate(refresh_count=0)
+    한국시세, 국제시세, 괴리율 = Goldresult
 
     caption = (
-        f"\n🗓️ {latest_date_utc} (US Market Close)\n"
-        f"📉 S&P 500 (Index): **{latest_gspc:.2f}**\n"
-        f"📈 VIX (Volatility): **{latest_vix:.2f}**"
-        # f"VIX and S&P 500 Index typically move in opposite directions.\n"
-    )
+            f"\n🗓️ {latest_date_utc} (US Market Close)\n"
+            f"📈 VIX (Volatility): **{latest_vix:.2f}**\n"   
+            f"📉 S&P 500 (Index): **{latest_gspc:.2f}**\n"
+            f"🙏 S&P 500 (Fear / Greed): {공탐레이팅}\n"                     
+            
+            # f"공탐: {공탐}\n"
+            # f"💹 풋/콜: {풋엔콜레이팅}\n"
+            # f"풋/콜 값: {풋엔콜값}\n"
+            f"🪙 업비트 (공포/탐욕): {코인레이팅}\n\n"
+            # f"코인: {코인}\n"
+            
+            f"💲 달러-원: {달러원:,.0f} 원\n"
+            f"💵 테더-원: {테더원:,.0f} 원\n"            
+            f"🏦 USDT/USD 괴리율: {달러테더괴리율:.2f} %\n"
+            # f"🏦 달러 인덱스 대비 원화 평가: {달러대비원화}\n\n"
+            
+            f"🇰🇷 한국 금 시세: {한국시세:,.0f} 원\n"
+            f"🇬🇧 국제 금 시세: {국제시세:,.0f} 원\n"
+            f"⚖️ KRX 금 시장 김프: {괴리율:.2f} %"
+        )
 
     success = await send_photo_via_http(TELEGRAM_TARGET_CHAT_ID, plot_buffer, caption)
     plot_buffer.close() # Close memory buffer (release memory)
