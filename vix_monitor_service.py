@@ -556,14 +556,14 @@ async def run_and_send_plot() -> bool:
             # f"🪙 업비트 (공포/탐욕): {코인레이팅}\n\n"
             # f"코인: {코인}\n"
             
-            f"💵 달러-원: {달러원:,.0f} 원\n"
-            f"💸 테더-원: {테더원:,.0f} 원\n"            
-            f"🏦 USDT/USD 괴리율: {달러테더괴리율:.2f} %\n\n"
+            f"💵 USD/KRW: {달러원:,.0f} 원\n"
+            f"💸 USDT/KRW: {테더원:,.0f} 원\n"            
+            f"🏦 USDT–USD Spread: {달러테더괴리율:.2f} %\n\n"
             # f"🏦 달러 인덱스 대비 원화 평가: {달러대비원화}\n\n"
             
-            f"🇰🇷 한국 금 시세: {한국시세:,.0f} 원\n"
-            f"🇬🇧 국제 금 시세: {국제시세:,.0f} 원\n"
-            f"⚖️ KRX 금 시장 김프: {괴리율:.2f} %"
+            f"🇰🇷 Korea Gold Price: {한국시세:,.0f} 원\n"
+            f"🇬🇧 Global Gold Price: {국제시세:,.0f} 원\n"
+            f"⚖️ KRX Gold Market Premium: {괴리율:.2f} %"
         )
 
     success = await send_photo_via_http(TELEGRAM_TARGET_CHAT_ID, plot_buffer, caption)
