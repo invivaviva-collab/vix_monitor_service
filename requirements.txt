@@ -4,3 +4,6 @@ aiohttp
 yfinance
 matplotlib
 python-multipart
+pandas
+numpy
+requests
