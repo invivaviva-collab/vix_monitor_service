@@ -569,11 +569,11 @@ async def run_and_send_plot() -> bool:
             
             f"🇰🇷 Gold Price: {한국시세:,.0f} KRW/g\n"
             f"🇬🇧 Gold Price: {국제시세:,.0f} KRW/g\n"
-            f"⚖️ KRX Gold Premium: {괴리율:.2f} %"
+            f"⚖️ KRX Gold Premium: {괴리율:.2f} %\n\n"
 
             f"💵 USD/KRW: {달러원:,.0f}\n"
             f"💸 USDT/KRW: {테더원:,.0f}\n"            
-            f"🏦 USDT UPbit Premium: {달러테더괴리율:.2f} %\n\n"
+            f"🏦 USDT UPbit Premium: {달러테더괴리율:.2f} %"
             # f"🏦 달러 인덱스 대비 원화 평가: {달러대비원화}\n\n"
         )
 
