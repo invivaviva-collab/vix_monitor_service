@@ -290,25 +290,24 @@ KST_TZ = ZoneInfo("Asia/Seoul")
 MONITOR_INTERVAL_SECONDS = 60 # Check time every 1 minute
 
 # ⏰ Global State: User-configurable send time (KST)
-TARGET_HOUR_KST = int(os.environ.get('TARGET_HOUR_KST', 6))
-TARGET_MINUTE_KST = int(os.environ.get('TARGET_MINUTE_KST', 20))
+# ⭐️ [수정] DST가 적용되지 않은 '기준 시간'으로 변수명 변경 (예: 겨울철 시간 06:20)
+BASE_TARGET_HOUR_KST = int(os.environ.get('TARGET_HOUR_KST', 6))
+BASE_TARGET_MINUTE_KST = int(os.environ.get('TARGET_MINUTE_KST', 20))
 
-# 뉴욕 기준 시간대 (썸머타임 자동 처리)
-ny_tz = ZoneInfo("America/New_York")
-now_ny = datetime.now(ny_tz)
+# ⭐️ [수정] 뉴욕 시간대(NY_TZ)는 상수로 정의
+NY_TZ = ZoneInfo("America/New_York")
 
-# 3. 썸머타임 (DST) 적용 여부 확인 및 KST 목표 시간 조정
-# now_ny.dst()가 0초가 아닌 시간(예: 1시간)을 반환하면 True로 평가됩니다.
-if now_ny.dst():
-    # 뉴욕이 DST 중이면 KST 목표 시간을 1시간 앞당깁니다.
-    # (6시 20분 -> 5시 20분)
-    TARGET_HOUR_KST -= 1
+# ⭐️ [제거] DST 체크 로직을 시작 시점이 아닌, 매일 시간을 계산하는 함수 내부로 이동
+# now_ny = datetime.now(ny_tz)
+# if now_ny.dst():
+#    TARGET_HOUR_KST -= 1
 
 
 # ⚠️ Load from environment variables (essential for Render environment)
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', 'YOUR_BOT_TOKEN_HERE')
 TELEGRAM_TARGET_CHAT_ID = os.environ.get('TELEGRAM_TARGET_CHAT_ID', '-1000000000')
 SERVER_PORT = int(os.environ.get("PORT", 8000))
+
 
 # Logging setup (INFO level for main operations)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -573,9 +572,9 @@ async def run_and_send_plot() -> bool:
             f"🏦 USDT Kimchi Premium: {달러테더괴리율:.2f} %\n\n"
             # f"🏦 달러 인덱스 대비 원화 평가: {달러대비원화}\n\n"
             
-            f"🇰🇷 Korea Gold Price: {한국시세:,.0f} KRW/g\n"
-            f"🇬🇧 Global Gold Price: {국제시세:,.0f} KRW/g\n"
-            f"⚖️ KRX Gold Market Premium: {괴리율:.2f} %"
+            f"🇰🇷 Gold Price: {한국시세:,.0f} KRW/g\n"
+            f"🇬🇧 Gold Price: {국제시세:,.0f} KRW/g\n"
+            f"⚖️ KRX Gold Premium: {괴리율:.2f} %"
         )
 
     success = await send_photo_via_http(TELEGRAM_TARGET_CHAT_ID, plot_buffer, caption)
@@ -591,25 +590,65 @@ async def run_and_send_plot() -> bool:
 # =========================================================
 # --- [4] Scheduling and Loop Logic ---
 # =========================================================
+
+# ⭐️ [신규] DST를 매일 확인하기 위한 헬퍼 함수
+def get_target_hour_for_kst_date(kst_date: datetime) -> int:
+    """
+    주어진 KST 날짜를 기준으로 뉴욕의 DST를 확인하여
+    정확한 KST 전송 시간을 반환합니다. (예: 5시 또는 6시)
+    """
+    # 전역 상수(Base 시간 및 NY 시간대)를 사용
+    global BASE_TARGET_HOUR_KST, NY_TZ 
+    
+    # KST 날짜(시간 포함)에 해당하는 뉴욕 시간을 확인
+    ny_time_equivalent = kst_date.astimezone(NY_TZ)
+    
+    target_hour = BASE_TARGET_HOUR_KST # 기본 시간 (겨울철 6시)
+    
+    # .dst()가 0이 아닌 timedelta를 반환하면 (즉, DST 적용 중이면) True
+    if ny_time_equivalent.dst():
+        target_hour -= 1 # 여름철 5시
+    
+    return target_hour
+
+# ⭐️ [수정] calculate_next_target_time 함수가 매일 DST를 새로 계산하도록 수정
 def calculate_next_target_time(now_kst: datetime) -> datetime:
-    """Calculates the next target send time (KST) based on the current time (uses global variables)."""
-    global TARGET_HOUR_KST, TARGET_MINUTE_KST
+    """
+    현재 KST 시간을 기준으로 다음 전송 시간을 계산합니다.
+    매번 뉴욕 DST를 확인하여 정확한 목표 시간을 설정합니다.
+    """
+    # 전역 상수(Base 분)를 사용
+    global BASE_TARGET_MINUTE_KST
+    
+    # 1. '오늘'의 정확한 목표 시간(DST 적용된)을 가져옵니다.
+    today_target_hour = get_target_hour_for_kst_date(now_kst)
     
     target_time_today = now_kst.replace(
-        hour=TARGET_HOUR_KST, 
-        minute=TARGET_MINUTE_KST, 
+        hour=today_target_hour, 
+        minute=BASE_TARGET_MINUTE_KST, 
         second=0, 
         microsecond=0
     )
     
     if now_kst >= target_time_today:
-        # If today's target time has passed, set it for tomorrow
-        next_target = target_time_today + timedelta(days=1)
+        # 이미 오늘 목표 시간이 지났다면, '내일'을 기준으로 다시 계산
+        tomorrow_kst = now_kst + timedelta(days=1)
+        
+        # 2. '내일'의 정확한 목표 시간(DST 적용된)을 가져옵니다.
+        tomorrow_target_hour = get_target_hour_for_kst_date(tomorrow_kst)
+        
+        next_target = tomorrow_kst.replace(
+            hour=tomorrow_target_hour,
+            minute=BASE_TARGET_MINUTE_KST,
+            second=0,
+            microsecond=0
+        )
     else:
-        # If today's target time has not yet arrived, set it for today
+        # 아직 오늘 목표 시간이 안 지났으면, 오늘 목표 시간 사용
         next_target = target_time_today
         
     return next_target
+
 
 async def main_monitor_loop():
     """Runs every minute, checks the send time, and triggers the job.
@@ -618,6 +657,7 @@ async def main_monitor_loop():
     
     # Initial setup of next send time
     now_kst = datetime.now(KST_TZ)
+    # ⭐️ 이제 이 함수는 호출 시점의 DST를 정확히 반영합니다.
     next_target_time_kst = calculate_next_target_time(now_kst)
     status['next_scheduled_time_kst'] = next_target_time_kst.strftime("%Y-%m-%d %H:%M:%S KST")
     
@@ -655,13 +695,15 @@ async def main_monitor_loop():
                     await run_and_send_plot()
                 
                 # Update the next target time (regardless of send success)
+                # ⭐️ DST를 다시 체크하여 다음 날짜의 목표 시간을 계산합니다.
                 next_target_time_kst = calculate_next_target_time(current_kst)
                 status['next_scheduled_time_kst'] = next_target_time_kst.strftime("%Y-%m-%d %H:%M:%S KST")
                 logger.info(f"➡️ Next scheduled time (KST): {status['next_scheduled_time_kst']}")
                 
             elif current_kst.day != next_target_time_kst.day and \
-                 current_kst.hour > TARGET_HOUR_KST + 1:
+                 current_kst.hour > BASE_TARGET_HOUR_KST + 1: # ⭐️ [수정] BASE 시간을 기준으로 체크
                 # Catch-up logic for missed target time (e.g., right after server restart)
+                # ⭐️ DST를 다시 체크하여 현재 날짜의 목표 시간을 계산합니다.
                 next_target_time_kst = calculate_next_target_time(current_kst)
                 status['next_scheduled_time_kst'] = next_target_time_kst.strftime("%Y-%m-%d %H:%M:%S KST")
 
@@ -726,7 +768,8 @@ async def set_schedule_time(
     minute: str = Form(...) 
 ):
     """Saves the KST time entered by the user and updates the next scheduled time."""
-    global TARGET_HOUR_KST, TARGET_MINUTE_KST
+    # ⭐️ [수정] BASE (기준) 변수를 업데이트하도록 변경
+    global BASE_TARGET_HOUR_KST, BASE_TARGET_MINUTE_KST
     global status
 
     try:
@@ -739,16 +782,17 @@ async def set_schedule_time(
     if not (0 <= hour_int <= 23 and 0 <= minute_int <= 59):
         raise HTTPException(status_code=400, detail="Hour must be 0-23 and minute 0-59.")
 
-    # ⭐️ Update global variables
-    TARGET_HOUR_KST = hour_int
-    TARGET_MINUTE_KST = minute_int
+    # ⭐️ [수정] 글로벌 변수 대신 BASE 변수를 업데이트
+    BASE_TARGET_HOUR_KST = hour_int
+    BASE_TARGET_MINUTE_KST = minute_int
     
     # ⭐️ Recalculate next send time immediately ⭐️
     now_kst = datetime.now(KST_TZ)
+    # ⭐️ 이제 이 함수는 DST를 정확히 반영합니다.
     next_target_time_kst = calculate_next_target_time(now_kst)
     status['next_scheduled_time_kst'] = next_target_time_kst.strftime("%Y-%m-%d %H:%M:%S KST")
 
-    logger.info(f"⏰ New send time set to KST {TARGET_HOUR_KST:02d}:{TARGET_MINUTE_KST:02d}. Next run: {status['next_scheduled_time_kst']}")
+    logger.info(f"⏰ New send time set to KST {BASE_TARGET_HOUR_KST:02d}:{BASE_TARGET_MINUTE_KST:02d} (Base). Next run: {status['next_scheduled_time_kst']}")
     
     # Redirect back to the status page
     return RedirectResponse(url="/", status_code=303)
@@ -779,9 +823,9 @@ async def home_status(request: Request):
     # Calculate current KST
     current_kst = datetime.now(KST_TZ).strftime("%Y-%m-%d %H:%M:%S KST")
     
-    # Get current scheduled time for the form
-    current_hour = TARGET_HOUR_KST
-    current_minute = TARGET_MINUTE_KST
+    # ⭐️ [수정] 폼에는 BASE 시간을 표시 (사용자가 설정한 시간)
+    current_hour = BASE_TARGET_HOUR_KST
+    current_minute = BASE_TARGET_MINUTE_KST
 
     html_content = f"""
     <!DOCTYPE html>
@@ -817,12 +861,12 @@ async def home_status(request: Request):
                 <p><strong>마지막 전송일:</strong> {status['last_sent_date_kst']}</p>
                 <p><strong>마지막 확인 시각:</strong> {status['last_check_time_kst']}</p>
                 <p><strong>마지막 자체 핑:</strong> {status['last_self_ping_kst']}</p>
-                <p><strong>설정된 전송 시간 (KST):</strong> {current_hour:02d}:{current_minute:02d}</p>
+                <p><strong>설정된 기준 시간 (KST):</strong> {current_hour:02d}:{current_minute:02d}</p>
             </div>
 
             {f'<div class="warning"><h3>설정 경고</h3><ul>{config_warning}</ul></div>' if config_warning else ''}
             
-            <h2>전송 시간 변경 (KST)</h2>
+            <h2>전송 기준 시간 변경 (KST, Non-DST)</h2>
             <form method="POST" action="/set-time">
                 <label for="hour">시 (0-23):</label>
                 <input type="number" id="hour" name="hour" value="{current_hour}" min="0" max="23" required>
@@ -834,7 +878,7 @@ async def home_status(request: Request):
             </form>
             
             <p style="margin-top: 20px; font-size: 0.9em; color: #666;">
-                *이 서비스는 매일 한 번, 설정된 KST 시간에 맞춰 텔레그램으로 VIX 및 S&P 500 차트를 전송합니다.
+                *이 서비스는 매일 한 번, 설정된 KST 기준 시간에 맞춰 텔레그램으로 VIX 및 S&P 500 차트를 전송합니다. (썸머타임 자동 적용)
             </p>
         </div>
     </body>
