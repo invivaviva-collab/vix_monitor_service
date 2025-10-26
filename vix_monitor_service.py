@@ -291,7 +291,19 @@ MONITOR_INTERVAL_SECONDS = 60 # Check time every 1 minute
 
 # ⏰ Global State: User-configurable send time (KST)
 TARGET_HOUR_KST = int(os.environ.get('TARGET_HOUR_KST', 6))
-TARGET_MINUTE_KST = int(os.environ.get('TARGET_MINUTE_KST', 0))
+TARGET_MINUTE_KST = int(os.environ.get('TARGET_MINUTE_KST', 20))
+
+# 뉴욕 기준 시간대 (썸머타임 자동 처리)
+ny_tz = ZoneInfo("America/New_York")
+now_ny = datetime.now(ny_tz)
+
+# 3. 썸머타임 (DST) 적용 여부 확인 및 KST 목표 시간 조정
+# now_ny.dst()가 0초가 아닌 시간(예: 1시간)을 반환하면 True로 평가됩니다.
+if now_ny.dst():
+    # 뉴욕이 DST 중이면 KST 목표 시간을 1시간 앞당깁니다.
+    # (6시 20분 -> 5시 20분)
+    TARGET_HOUR_KST -= 1
+
 
 # ⚠️ Load from environment variables (essential for Render environment)
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', 'YOUR_BOT_TOKEN_HERE')
@@ -558,7 +570,7 @@ async def run_and_send_plot() -> bool:
             
             f"💵 USD/KRW: {달러원:,.0f}\n"
             f"💸 USDT/KRW: {테더원:,.0f}\n"            
-            f"🏦 USDT–USD Spread: {달러테더괴리율:.2f} %\n\n"
+            f"🏦 USDT Kimchi Premium: {달러테더괴리율:.2f} %\n\n"
             # f"🏦 달러 인덱스 대비 원화 평가: {달러대비원화}\n\n"
             
             f"🇰🇷 Korea Gold Price: {한국시세:,.0f} KRW/g\n"
