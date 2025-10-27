@@ -303,6 +303,12 @@ NY_TZ = ZoneInfo("America/New_York")
 #    TARGET_HOUR_KST -= 1
 
 
+# ⚠️ Load from environment variables (essential for Render environment)
+TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', 'YOUR_BOT_TOKEN_HERE')
+TELEGRAM_TARGET_CHAT_ID = os.environ.get('TELEGRAM_TARGET_CHAT_ID', '-1000000000')
+SERVER_PORT = int(os.environ.get("PORT", 8000))
+
+
 # Logging setup (INFO level for main operations)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
