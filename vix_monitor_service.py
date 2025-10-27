@@ -303,12 +303,6 @@ NY_TZ = ZoneInfo("America/New_York")
 #    TARGET_HOUR_KST -= 1
 
 
-# ⚠️ Load from environment variables (essential for Render environment)
-TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', 'YOUR_BOT_TOKEN_HERE')
-TELEGRAM_TARGET_CHAT_ID = os.environ.get('TELEGRAM_TARGET_CHAT_ID', '-1000000000')
-SERVER_PORT = int(os.environ.get("PORT", 8000))
-
-
 # Logging setup (INFO level for main operations)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -338,12 +332,13 @@ def _sync_fetch_and_plot_data(width=6.4, height=4.8) -> Optional[Tuple[io.BytesI
     tickers = ["^VIX", "^GSPC"]
     vix, qqq = None, None
     
-    # Using a fixed start date for consistent comparison
-    start_date = "2025-03-01" 
+    # ⭐️ [수정] 차트 기간을 최근 1년으로 동적 설정
+    today = datetime.now()
+    one_year_ago = today - timedelta(days=365)
+    start_date = one_year_ago.strftime("%Y-%m-%d")
     
-    logger.info("Executing synchronous data download and chart generation...")
-            
-    # --- Data Download (Synchronous I/O) ---
+    
+    logger.info(f"Executing synchronous data download and chart generation... (Start Date: {start_date})")
     # Download data using yfinance
     data_all = yf.download(tickers, start=start_date, progress=False, timeout=20)
             
@@ -392,10 +387,10 @@ def _sync_fetch_and_plot_data(width=6.4, height=4.8) -> Optional[Tuple[io.BytesI
         # S&P 500 (GSPC)
         ax1.plot(common_dates, qqq.values, color=qqq_color, linewidth=1.5)
         
-        # X-axis date format and interval setting
-        formatter = mdates.DateFormatter('%y-%m-%d') 
+        # ⭐️ [수정] X축 포맷과 간격을 1달 단위로 설정
+        formatter = mdates.DateFormatter('%Y-%m') # 연-월 형식
         ax1.xaxis.set_major_formatter(formatter)
-        ax1.xaxis.set_major_locator(mdates.MonthLocator(interval=3)) 
+        ax1.xaxis.set_major_locator(mdates.MonthLocator(interval=1)) # 1달 간격
         fig.autofmt_xdate(rotation=45)
 
         # Y-axis label setting
