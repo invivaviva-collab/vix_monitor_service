@@ -167,7 +167,7 @@ class GoldKimpAnalyzer:
         
         logging.info("지표 계산 및 반환 성공.")
         return metrics
-Goldresult = GoldKimpAnalyzer().get_core_metrics()
+gold_analyzer = GoldKimpAnalyzer()
 
 
 
@@ -554,7 +554,7 @@ async def run_and_send_plot() -> bool:
     # Latest data is already fetched inside plot_vix_sp500
     공탐레이팅, 공탐, 풋엔콜레이팅, 풋엔콜값, 코인레이팅, 코인 = fetcher.fetch_all()
     테더원, 달러원, 달러테더괴리율 = get_usdt_and_exchange_rate()
-    한국시세, 국제시세, 괴리율 = Goldresult
+    한국시세, 국제시세, 괴리율 = gold_analyzer.get_core_metrics()
 
     caption = (
             f"\n🗓️ {latest_date_utc} (US Market Close)\n"
