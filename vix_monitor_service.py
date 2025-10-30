@@ -557,7 +557,7 @@ async def run_and_send_plot() -> bool:
     한국시세, 국제시세, 괴리율 = gold_analyzer.get_core_metrics()
 
     caption = (
-            f"\n🗓️ {latest_date_utc} (US Market Close)\n"
+            f"\n🗓️ {latest_date_utc} (US Market Closed)\n"
             f"📈 VIX (Volatility): {latest_vix:.2f}\n"   
             f"📉 S&P 500 (Index): {latest_gspc:.2f}\n"
             f"🙏 S&P 500 (Fear/Greed): {공탐레이팅}\n\n"                     
@@ -568,8 +568,8 @@ async def run_and_send_plot() -> bool:
             # f"🪙 업비트 (공포/탐욕): {코인레이팅}\n\n"
             # f"코인: {코인}\n"          
             
-            f"🇰🇷 Gold Price: {한국시세:,.0f} KRW/g\n"
-            f"🇬🇧 Gold Price: {국제시세:,.0f} KRW/g\n"
+            f"🇰🇷 KRX Gold Price (At close 15:30 KST): {한국시세:,.0f} KRW/g\n"
+            f"🇺🇸 XAUUSD Gold Price (Live): {국제시세:,.0f} KRW/g\n"
             f"⚖️ KRX Gold Premium: {괴리율:.2f} %\n\n"
 
             f"💵 USD/KRW: {달러원:,.0f}\n"
