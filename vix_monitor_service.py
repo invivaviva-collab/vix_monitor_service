@@ -568,8 +568,8 @@ async def run_and_send_plot() -> bool:
             # f"🪙 업비트 (공포/탐욕): {코인레이팅}\n\n"
             # f"코인: {코인}\n"          
             
-            f"🇰🇷 KRX Gold Price (At close 15:30 KST): {한국시세:,.0f} KRW/g\n"
-            f"🇺🇸 XAUUSD Gold Price (Live): {국제시세:,.0f} KRW/g\n"
+            f"🇰🇷 KRX (At close 15:30): {한국시세:,.0f} ₩/g\n"
+            f"🇺🇸 XAU/USD (Live): {국제시세:,.0f} ₩/g\n"
             f"⚖️ KRX Gold Premium: {괴리율:.2f} %\n\n"
 
             f"💵 USD/KRW: {달러원:,.0f}\n"
