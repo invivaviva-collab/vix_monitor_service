@@ -167,7 +167,7 @@ class GoldKimpAnalyzer:
         
         logging.info("지표 계산 및 반환 성공.")
         return metrics
-gold_analyzer = GoldKimpAnalyzer()
+# gold_analyzer = GoldKimpAnalyzer()
 
 
 
@@ -554,7 +554,7 @@ async def run_and_send_plot() -> bool:
     # Latest data is already fetched inside plot_vix_sp500
     공탐레이팅, 공탐, 풋엔콜레이팅, 풋엔콜값, 코인레이팅, 코인 = fetcher.fetch_all()
     테더원, 달러원, 달러테더괴리율 = get_usdt_and_exchange_rate()
-    한국시세, 국제시세, 괴리율 = gold_analyzer.get_core_metrics()
+    # 한국시세, 국제시세, 괴리율 = gold_analyzer.get_core_metrics()
 
     caption = (
             f"\n🗓️ {latest_date_utc} (US Market Closed)\n"
@@ -568,9 +568,9 @@ async def run_and_send_plot() -> bool:
             # f"🪙 업비트 (공포/탐욕): {코인레이팅}\n\n"
             # f"코인: {코인}\n"          
             
-            f"🇰🇷 KRX (At close 15:30): {한국시세:,.0f} ₩/g\n"
-            f"🇺🇸 XAU/USD (Live): {국제시세:,.0f} ₩/g\n"
-            f"⚖️ KRX Gold Premium: {괴리율:.2f} %\n\n"
+            # f"🇰🇷 KRX (At close 15:30): {한국시세:,.0f} ₩/g\n"
+            # f"🇺🇸 XAU/USD (Live): {국제시세:,.0f} ₩/g\n"
+            # f"⚖️ KRX Gold Premium: {괴리율:.2f} %\n\n"
 
             f"💵 USD/KRW: {달러원:,.0f}\n"
             f"💸 USDT/KRW: {테더원:,.0f}\n"            
