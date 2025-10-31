@@ -553,14 +553,14 @@ async def run_and_send_plot() -> bool:
     
     # Latest data is already fetched inside plot_vix_sp500
     공탐레이팅, 공탐, 풋엔콜레이팅, 풋엔콜값, 코인레이팅, 코인 = fetcher.fetch_all()
-    테더원, 달러원, 달러테더괴리율 = get_usdt_and_exchange_rate()
+    # 테더원, 달러원, 달러테더괴리율 = get_usdt_and_exchange_rate()
     # 한국시세, 국제시세, 괴리율 = gold_analyzer.get_core_metrics()
 
     caption = (
             f"\n🗓️ {latest_date_utc} (US Market Closed)\n"
             f"📈 VIX (Volatility): {latest_vix:.2f}\n"   
             f"📉 S&P 500 (Index): {latest_gspc:.2f}\n"
-            f"🙏 S&P 500 (Fear/Greed): {공탐레이팅}\n\n"                     
+            f"🙏 S&P 500 (Fear/Greed): {공탐레이팅}"                     
             
             # f"공탐: {공탐}\n"
             # f"💹 풋/콜: {풋엔콜레이팅}\n"
@@ -572,9 +572,9 @@ async def run_and_send_plot() -> bool:
             # f"🇺🇸 XAU/USD (Live): {국제시세:,.0f} ₩/g\n"
             # f"⚖️ KRX Gold Premium: {괴리율:.2f} %\n\n"
 
-            f"💵 USD/KRW: {달러원:,.0f}\n"
-            f"💸 USDT/KRW: {테더원:,.0f}\n"            
-            f"🏦 UPbit USDT Premium: {달러테더괴리율:.2f} %"
+            # f"💵 USD/KRW: {달러원:,.0f}\n"
+            # f"💸 USDT/KRW: {테더원:,.0f}\n"            
+            # f"🏦 UPbit USDT Premium: {달러테더괴리율:.2f} %"
             # f"🏦 달러 인덱스 대비 원화 평가: {달러대비원화}\n\n"
         )
 
